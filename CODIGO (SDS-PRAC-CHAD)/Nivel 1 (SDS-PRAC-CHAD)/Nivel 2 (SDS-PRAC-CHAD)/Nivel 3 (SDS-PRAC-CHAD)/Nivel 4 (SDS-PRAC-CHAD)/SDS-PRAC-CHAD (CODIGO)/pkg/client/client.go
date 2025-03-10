@@ -1,8 +1,9 @@
-// Package client contains the user interaction logic and communication with the server...
+// Package client contains the user interaction logic and communication with the server.
 package client
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,14 +12,18 @@ import (
 	"os"
 
 	"prac/pkg/api"
+	"prac/pkg/crypto"
 	"prac/pkg/ui"
 )
 
-// client is an internal structure that controls the session state (user, token) and logger.
+// client is an internal structure that controls the session state (user, token)
+// and holds the encryption key for end-to-end encryption.
 type client struct {
-	log         *log.Logger
-	currentUser string
-	authToken   string
+	log               *log.Logger
+	currentUser       string
+	authToken         string
+	encryptionKey     []byte
+	plaintextPassword string // temporarily store password for key derivation
 }
 
 // Run is the only exported function of this package.
@@ -133,7 +138,16 @@ func (c *client) registerUser() {
 		if loginRes.Success {
 			c.currentUser = username
 			c.authToken = loginRes.Token
-			fmt.Println("Automatic login successful. Token saved.")
+			// Derive the encryption key using the password and username.
+			key, err := crypto.DeriveKey(password, username)
+			if err != nil {
+				fmt.Println("Error deriving encryption key:", err)
+				return
+			}
+			c.encryptionKey = key
+			// Store the plaintext password temporarily for future key derivation.
+			c.plaintextPassword = password
+			fmt.Println("Automatic login successful. Token and encryption key saved.")
 		} else {
 			fmt.Println("Automatic login failed:", loginRes.Message)
 		}
@@ -161,12 +175,21 @@ func (c *client) loginUser() {
 	if res.Success {
 		c.currentUser = username
 		c.authToken = res.Token
-		fmt.Println("Login successful. Token saved.")
+		// Derive the encryption key using the password and username.
+		key, err := crypto.DeriveKey(password, username)
+		if err != nil {
+			fmt.Println("Error deriving encryption key:", err)
+			return
+		}
+		c.encryptionKey = key
+		// Store the plaintext password temporarily.
+		c.plaintextPassword = password
+		fmt.Println("Login successful. Token and encryption key saved.")
 	}
 }
 
 // fetchData requests private data from the server.
-// The server returns the data associated with the logged in user.
+// The server returns the encrypted data associated with the logged in user.
 func (c *client) fetchData() {
 	ui.ClearScreen()
 	fmt.Println("** Get User Data **")
@@ -187,13 +210,30 @@ func (c *client) fetchData() {
 	fmt.Println("Success:", res.Success)
 	fmt.Println("Message:", res.Message)
 
-	// If successful, display the retrieved data.
+	// If successful, decrypt and display the retrieved data.
 	if res.Success {
-		fmt.Println("Your data:", res.Data)
+		if res.Data != "" {
+			// Decode the base64 encoded encrypted data.
+			encryptedData, err := base64.StdEncoding.DecodeString(res.Data)
+			if err != nil {
+				fmt.Println("Error decoding data:", err)
+				return
+			}
+			// Decrypt the data using the encryption key.
+			decryptedData, err := crypto.Decrypt(encryptedData, c.encryptionKey)
+			if err != nil {
+				fmt.Println("Error decrypting data:", err)
+				return
+			}
+			fmt.Println("Your data:", string(decryptedData))
+		} else {
+			fmt.Println("No data found.")
+		}
 	}
 }
 
 // updateData requests new text and sends it to the server with ActionUpdateData.
+// The data is encrypted on the client side before sending.
 func (c *client) updateData() {
 	ui.ClearScreen()
 	fmt.Println("** Update User Data **")
@@ -206,12 +246,21 @@ func (c *client) updateData() {
 	// Read the new data.
 	newData := ui.ReadInput("Enter the content to store")
 
+	// Encrypt the data using the encryption key.
+	encryptedData, err := crypto.Encrypt([]byte(newData), c.encryptionKey)
+	if err != nil {
+		fmt.Println("Error encrypting data:", err)
+		return
+	}
+	// Encode the encrypted data to base64 for safe JSON transmission.
+	encodedData := base64.StdEncoding.EncodeToString(encryptedData)
+
 	// Send the update request.
 	res := c.sendRequest(api.Request{
 		Action:   api.ActionUpdateData,
 		Username: c.currentUser,
 		Token:    c.authToken,
-		Data:     newData,
+		Data:     encodedData,
 	})
 
 	fmt.Println("Success:", res.Success)
@@ -219,7 +268,7 @@ func (c *client) updateData() {
 }
 
 // logoutUser calls the logout action on the server, and if successful,
-// clears the local session (currentUser/authToken).
+// clears the local session (currentUser/authToken/encryptionKey).
 func (c *client) logoutUser() {
 	ui.ClearScreen()
 	fmt.Println("** Logout **")
@@ -243,6 +292,8 @@ func (c *client) logoutUser() {
 	if res.Success {
 		c.currentUser = ""
 		c.authToken = ""
+		c.encryptionKey = nil
+		c.plaintextPassword = ""
 	}
 }
 
