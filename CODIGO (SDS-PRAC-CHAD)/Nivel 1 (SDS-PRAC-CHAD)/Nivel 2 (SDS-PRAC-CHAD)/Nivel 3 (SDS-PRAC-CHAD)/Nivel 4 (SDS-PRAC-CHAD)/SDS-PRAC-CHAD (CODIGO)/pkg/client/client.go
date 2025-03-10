@@ -3,12 +3,17 @@ package client
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"prac/pkg/api"
 	"prac/pkg/ui"
@@ -19,12 +24,13 @@ type client struct {
 	log         *log.Logger
 	currentUser string
 	authToken   string
+	privateKey  *rsa.PrivateKey
 }
 
 // Run is the only exported function of this package.
 // It creates an internal client and starts the main loop.
 func Run() {
-	// Create a logger with the prefix 'cli' to identify messages on the console.
+	// Create a logger with the prefix "cli" to identify messages on the console.
 	c := &client{
 		log: log.New(os.Stdout, "[cli] ", log.LstdFlags),
 	}
@@ -101,7 +107,43 @@ func (c *client) runLoop() {
 	}
 }
 
-// registerUser requests credentials and sends them to the server for registration.
+// generateKeyPair generates an RSA key pair (2048 bits).
+// It returns the PEM-encoded public key as a string and stores the private key in the client.
+func (c *client) generateKeyPair() (string, error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", err
+	}
+	c.privateKey = key
+
+	pubASN1, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		return "", err
+	}
+	pubPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: pubASN1,
+	})
+	return string(pubPEM), nil
+}
+
+// savePrivateKey saves the private key in PEM format to a file in a "keys" folder.
+func (c *client) savePrivateKey(username string) error {
+	// Create the keys folder if it does not exist.
+	err := os.MkdirAll("keys", 0700)
+	if err != nil {
+		return err
+	}
+	keyFile := filepath.Join("keys", username+"_private.pem")
+	keyBytes := x509.MarshalPKCS1PrivateKey(c.privateKey)
+	pemData := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: keyBytes,
+	})
+	return os.WriteFile(keyFile, pemData, 0600)
+}
+
+// registerUser requests credentials, generates a key pair, and sends them to the server for registration.
 // If registration is successful, it attempts an automatic login.
 func (c *client) registerUser() {
 	ui.ClearScreen()
@@ -110,11 +152,25 @@ func (c *client) registerUser() {
 	username := ui.ReadInput("Username")
 	password := ui.ReadInput("Password")
 
-	// Send the registration request to the server.
+	// Generate RSA key pair.
+	pubKey, err := c.generateKeyPair()
+	if err != nil {
+		fmt.Println("Error generating key pair:", err)
+		return
+	}
+
+	// Save the private key locally.
+	if err := c.savePrivateKey(username); err != nil {
+		fmt.Println("Error saving private key:", err)
+		return
+	}
+
+	// Send the registration request to the server, including the public key.
 	res := c.sendRequest(api.Request{
-		Action:   api.ActionRegister,
-		Username: username,
-		Password: password,
+		Action:    api.ActionRegister,
+		Username:  username,
+		Password:  password,
+		PublicKey: pubKey,
 	})
 
 	// Display the result.

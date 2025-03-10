@@ -42,7 +42,7 @@ func Run() error {
 		return fmt.Errorf("error opening database: %v", err)
 	}
 
-	// Create our server with a logger with prefix 'srv'.
+	// Create our server with a logger with prefix "srv".
 	srv := &server{
 		db:  db,
 		log: log.New(os.Stdout, "[srv] ", log.LstdFlags),
@@ -99,15 +99,16 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // registerUser registers a new user if they do not exist.
-// It hashes the password using bcrypt, stores it in the 'auth' namespace,
-// and creates an empty entry in 'userdata' for the user.
+// It hashes the password using bcrypt, stores it in the "auth" namespace,
+// creates an empty entry in "userdata" for the user, and stores the public key
+// in the "pubkeys" namespace.
 func (s *server) registerUser(req api.Request) api.Response {
 	// Basic validation.
 	if req.Username == "" || req.Password == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
 
-	// Check if the user already exists in 'auth'.
+	// Check if the user already exists in "auth".
 	exists, err := s.userExists(req.Username)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error checking user"}
@@ -122,26 +123,33 @@ func (s *server) registerUser(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error hashing password"}
 	}
 
-	// Store the hashed password in the 'auth' namespace (key=username, value=hashed password).
+	// Store the hashed password in the "auth" namespace (key=username, value=hashed password).
 	if err := s.db.Put("auth", []byte(req.Username), hashedPassword); err != nil {
 		return api.Response{Success: false, Message: "Error saving credentials"}
 	}
 
-	// Create an empty entry for user data in 'userdata'.
+	// Create an empty entry for user data in "userdata".
 	if err := s.db.Put("userdata", []byte(req.Username), []byte("")); err != nil {
 		return api.Response{Success: false, Message: "Error initializing user data"}
+	}
+
+	// If a public key is provided, store it in the "pubkeys" namespace.
+	if req.PublicKey != "" {
+		if err := s.db.Put("pubkeys", []byte(req.Username), []byte(req.PublicKey)); err != nil {
+			return api.Response{Success: false, Message: "Error saving public key"}
+		}
 	}
 
 	return api.Response{Success: true, Message: "User registered"}
 }
 
-// loginUser validates credentials in the 'auth' namespace and generates a secure token in 'sessions'.
+// loginUser validates credentials in the "auth" namespace and generates a secure token in "sessions".
 func (s *server) loginUser(req api.Request) api.Response {
 	if req.Username == "" || req.Password == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
 
-	// Retrieve the stored hashed password from 'auth'.
+	// Retrieve the stored hashed password from "auth".
 	storedHash, err := s.db.Get("auth", []byte(req.Username))
 	if err != nil {
 		return api.Response{Success: false, Message: "User not found"}
@@ -158,7 +166,7 @@ func (s *server) loginUser(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error generating token"}
 	}
 
-	// Store the token in the 'sessions' namespace.
+	// Store the token in the "sessions" namespace.
 	if err := s.db.Put("sessions", []byte(req.Username), []byte(token)); err != nil {
 		return api.Response{Success: false, Message: "Error creating session"}
 	}
@@ -166,7 +174,7 @@ func (s *server) loginUser(req api.Request) api.Response {
 	return api.Response{Success: true, Message: "Login successful", Token: token}
 }
 
-// fetchData verifies the token and returns the content from the 'userdata' namespace.
+// fetchData verifies the token and returns the content from the "userdata" namespace.
 func (s *server) fetchData(req api.Request) api.Response {
 	if req.Username == "" || req.Token == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
@@ -175,7 +183,7 @@ func (s *server) fetchData(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Invalid or expired token"}
 	}
 
-	// Retrieve the data associated with the user from 'userdata'.
+	// Retrieve the data associated with the user from "userdata".
 	rawData, err := s.db.Get("userdata", []byte(req.Username))
 	if err != nil {
 		return api.Response{Success: false, Message: "Error retrieving user data"}
@@ -188,7 +196,7 @@ func (s *server) fetchData(req api.Request) api.Response {
 	}
 }
 
-// updateData updates the content of 'userdata' after verifying the token.
+// updateData updates the content of "userdata" after verifying the token.
 func (s *server) updateData(req api.Request) api.Response {
 	if req.Username == "" || req.Token == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
@@ -205,7 +213,7 @@ func (s *server) updateData(req api.Request) api.Response {
 	return api.Response{Success: true, Message: "User data updated"}
 }
 
-// logoutUser deletes the session in 'sessions', invalidating the token.
+// logoutUser deletes the session in "sessions", invalidating the token.
 func (s *server) logoutUser(req api.Request) api.Response {
 	if req.Username == "" || req.Token == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
@@ -214,7 +222,7 @@ func (s *server) logoutUser(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Invalid or expired token"}
 	}
 
-	// Delete the session entry in 'sessions'.
+	// Delete the session entry in "sessions".
 	if err := s.db.Delete("sessions", []byte(req.Username)); err != nil {
 		return api.Response{Success: false, Message: "Error closing session"}
 	}
@@ -222,7 +230,7 @@ func (s *server) logoutUser(req api.Request) api.Response {
 	return api.Response{Success: true, Message: "Session closed successfully"}
 }
 
-// userExists checks if a user exists in the 'auth' namespace.
+// userExists checks if a user exists in the "auth" namespace.
 // Returns false if the user is not found.
 func (s *server) userExists(username string) (bool, error) {
 	_, err := s.db.Get("auth", []byte(username))
@@ -238,7 +246,7 @@ func (s *server) userExists(username string) (bool, error) {
 	return true, nil
 }
 
-// isTokenValid checks if the token stored in 'sessions' matches the provided token.
+// isTokenValid checks if the token stored in "sessions" matches the provided token.
 func (s *server) isTokenValid(username, token string) bool {
 	storedToken, err := s.db.Get("sessions", []byte(username))
 	if err != nil {
