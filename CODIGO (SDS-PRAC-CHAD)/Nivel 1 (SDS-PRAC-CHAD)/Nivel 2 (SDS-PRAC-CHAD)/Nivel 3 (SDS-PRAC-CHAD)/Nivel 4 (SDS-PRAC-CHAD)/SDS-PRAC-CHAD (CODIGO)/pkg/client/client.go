@@ -1,4 +1,4 @@
-// Package client contains the user interaction logic and communication with the server.
+// Package client contains the user interaction logic and communication with the server...
 package client
 
 import (
