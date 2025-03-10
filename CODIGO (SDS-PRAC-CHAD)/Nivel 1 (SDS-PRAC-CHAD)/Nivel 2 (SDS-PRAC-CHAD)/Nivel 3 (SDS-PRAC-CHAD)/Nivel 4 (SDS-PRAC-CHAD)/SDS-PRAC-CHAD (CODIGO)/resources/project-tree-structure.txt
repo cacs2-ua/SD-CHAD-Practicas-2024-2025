@@ -1,0 +1,16 @@
+/prac_extracted
+│── go.mod
+│── go.sum
+│── main.go
+│── pkg
+    ├── api
+    │   └── api.go
+    ├── client
+    │   └── client.go
+    ├── server
+    │   └── server.go
+    ├── store
+    │   ├── bbolt.go
+    │   └── store.go
+    ├── ui
+    │   └── ui.go
