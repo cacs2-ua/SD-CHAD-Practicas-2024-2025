@@ -44,7 +44,6 @@ func Run() error {
 	mux.Handle("/api", http.HandlerFunc(srv.apiHandler))
 
 	// Start the HTTPS server on port 8080 using TLS.
-	// Make sure to create a 'certs' folder with server.crt and server.key.
 	err = http.ListenAndServeTLS(":8080", "certs/server.crt", "certs/server.key", mux)
 	return err
 }
