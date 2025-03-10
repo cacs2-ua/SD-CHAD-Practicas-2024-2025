@@ -1,5 +1,4 @@
-// El paquete client contiene la lógica de interacción con el usuario
-// así como de comunicación con el servidor.
+// Package client contains the user interaction logic and communication with the server.
 package client
 
 import (
@@ -15,77 +14,74 @@ import (
 	"prac/pkg/ui"
 )
 
-// client estructura interna no exportada que controla
-// el estado de la sesión (usuario, token) y logger.
+// client is an internal structure that controls the session state (user, token) and logger.
 type client struct {
 	log         *log.Logger
 	currentUser string
 	authToken   string
 }
 
-// Run es la única función exportada de este paquete.
-// Crea un client interno y ejecuta el bucle principal.
+// Run is the only exported function of this package.
+// It creates an internal client and starts the main loop.
 func Run() {
-	// Creamos un logger con prefijo 'cli' para identificar
-	// los mensajes en la consola.
+	// Create a logger with the prefix 'cli' to identify messages on the console.
 	c := &client{
 		log: log.New(os.Stdout, "[cli] ", log.LstdFlags),
 	}
 	c.runLoop()
 }
 
-// runLoop maneja la lógica del menú principal.
-// Si NO hay usuario logueado, se muestran ciertas opciones;
-// si SÍ hay usuario logueado, se muestran otras.
+// runLoop handles the main menu logic.
+// Different options are shown depending on whether a user is logged in.
 func (c *client) runLoop() {
 	for {
 		ui.ClearScreen()
 
-		// Construimos un título que muestre el usuario logueado, si lo hubiera.
+		// Build a title showing the logged in user, if any.
 		var title string
 		if c.currentUser == "" {
-			title = "Menú"
+			title = "Menu"
 		} else {
-			title = fmt.Sprintf("Menú (%s)", c.currentUser)
+			title = fmt.Sprintf("Menu (%s)", c.currentUser)
 		}
 
-		// Generamos las opciones dinámicamente, según si hay un login activo.
+		// Generate options dynamically based on login state.
 		var options []string
 		if c.currentUser == "" {
-			// Usuario NO logueado: Registro, Login, Salir
+			// Not logged in: Register, Login, Exit
 			options = []string{
-				"Registrar usuario",
-				"Iniciar sesión",
-				"Salir",
+				"Register user",
+				"Login",
+				"Exit",
 			}
 		} else {
-			// Usuario logueado: Ver datos, Actualizar datos, Logout, Salir
+			// Logged in: View data, Update data, Logout, Exit
 			options = []string{
-				"Ver datos",
-				"Actualizar datos",
-				"Cerrar sesión",
-				"Salir",
+				"View data",
+				"Update data",
+				"Logout",
+				"Exit",
 			}
 		}
 
-		// Mostramos el menú y obtenemos la elección del usuario.
+		// Display the menu and get the user's choice.
 		choice := ui.PrintMenu(title, options)
 
-		// Hay que mapear la opción elegida según si está logueado o no.
+		// Map the chosen option based on login state.
 		if c.currentUser == "" {
-			// Caso NO logueado
+			// Not logged in.
 			switch choice {
 			case 1:
 				c.registerUser()
 			case 2:
 				c.loginUser()
 			case 3:
-				// Opción Salir
-				c.log.Println("Saliendo del cliente...")
+				// Exit option.
+				c.log.Println("Exiting client...")
 				return
 			}
 		} else {
-			// Caso logueado
+			// Logged in.
 			switch choice {
 			case 1:
 				c.fetchData()
@@ -94,40 +90,40 @@ func (c *client) runLoop() {
 			case 3:
 				c.logoutUser()
 			case 4:
-				// Opción Salir
-				c.log.Println("Saliendo del cliente...")
+				// Exit option.
+				c.log.Println("Exiting client...")
 				return
 			}
 		}
 
-		// Pausa para que el usuario vea resultados.
-		ui.Pause("Pulsa [Enter] para continuar...")
+		// Pause so the user can see the results.
+		ui.Pause("Press [Enter] to continue...")
 	}
 }
 
-// registerUser pide credenciales y las envía al servidor para un registro.
-// Si el registro es exitoso, se intenta el login automático.
+// registerUser requests credentials and sends them to the server for registration.
+// If registration is successful, it attempts an automatic login.
 func (c *client) registerUser() {
 	ui.ClearScreen()
-	fmt.Println("** Registro de usuario **")
+	fmt.Println("** User Registration **")
 
-	username := ui.ReadInput("Nombre de usuario")
-	password := ui.ReadInput("Contraseña")
+	username := ui.ReadInput("Username")
+	password := ui.ReadInput("Password")
 
-	// Enviamos la acción al servidor
+	// Send the registration request to the server.
 	res := c.sendRequest(api.Request{
 		Action:   api.ActionRegister,
 		Username: username,
 		Password: password,
 	})
 
-	// Mostramos resultado
-	fmt.Println("Éxito:", res.Success)
-	fmt.Println("Mensaje:", res.Message)
+	// Display the result.
+	fmt.Println("Success:", res.Success)
+	fmt.Println("Message:", res.Message)
 
-	// Si fue exitoso, probamos loguear automáticamente.
+	// If successful, attempt automatic login.
 	if res.Success {
-		c.log.Println("Registro exitoso; intentando login automático...")
+		c.log.Println("Registration successful; attempting automatic login...")
 
 		loginRes := c.sendRequest(api.Request{
 			Action:   api.ActionLogin,
@@ -137,20 +133,20 @@ func (c *client) registerUser() {
 		if loginRes.Success {
 			c.currentUser = username
 			c.authToken = loginRes.Token
-			fmt.Println("Login automático exitoso. Token guardado.")
+			fmt.Println("Automatic login successful. Token saved.")
 		} else {
-			fmt.Println("No se ha podido hacer login automático:", loginRes.Message)
+			fmt.Println("Automatic login failed:", loginRes.Message)
 		}
 	}
 }
 
-// loginUser pide credenciales y realiza un login en el servidor.
+// loginUser requests credentials and performs login on the server.
 func (c *client) loginUser() {
 	ui.ClearScreen()
-	fmt.Println("** Inicio de sesión **")
+	fmt.Println("** Login **")
 
-	username := ui.ReadInput("Nombre de usuario")
-	password := ui.ReadInput("Contraseña")
+	username := ui.ReadInput("Username")
+	password := ui.ReadInput("Password")
 
 	res := c.sendRequest(api.Request{
 		Action:   api.ActionLogin,
@@ -158,59 +154,59 @@ func (c *client) loginUser() {
 		Password: password,
 	})
 
-	fmt.Println("Éxito:", res.Success)
-	fmt.Println("Mensaje:", res.Message)
+	fmt.Println("Success:", res.Success)
+	fmt.Println("Message:", res.Message)
 
-	// Si login fue exitoso, guardamos currentUser y el token.
+	// If login is successful, save currentUser and the token.
 	if res.Success {
 		c.currentUser = username
 		c.authToken = res.Token
-		fmt.Println("Sesión iniciada con éxito. Token guardado.")
+		fmt.Println("Login successful. Token saved.")
 	}
 }
 
-// fetchData pide datos privados al servidor.
-// El servidor devuelve la data asociada al usuario logueado.
+// fetchData requests private data from the server.
+// The server returns the data associated with the logged in user.
 func (c *client) fetchData() {
 	ui.ClearScreen()
-	fmt.Println("** Obtener datos del usuario **")
+	fmt.Println("** Get User Data **")
 
-	// Chequeo básico de que haya sesión
+	// Basic check for a valid session.
 	if c.currentUser == "" || c.authToken == "" {
-		fmt.Println("No estás logueado. Inicia sesión primero.")
+		fmt.Println("Not logged in. Please log in first.")
 		return
 	}
 
-	// Hacemos la request con ActionFetchData
+	// Send the fetch data request.
 	res := c.sendRequest(api.Request{
 		Action:   api.ActionFetchData,
 		Username: c.currentUser,
 		Token:    c.authToken,
 	})
 
-	fmt.Println("Éxito:", res.Success)
-	fmt.Println("Mensaje:", res.Message)
+	fmt.Println("Success:", res.Success)
+	fmt.Println("Message:", res.Message)
 
-	// Si fue exitoso, mostramos la data recibida
+	// If successful, display the retrieved data.
 	if res.Success {
-		fmt.Println("Tus datos:", res.Data)
+		fmt.Println("Your data:", res.Data)
 	}
 }
 
-// updateData pide nuevo texto y lo envía al servidor con ActionUpdateData.
+// updateData requests new text and sends it to the server with ActionUpdateData.
 func (c *client) updateData() {
 	ui.ClearScreen()
-	fmt.Println("** Actualizar datos del usuario **")
+	fmt.Println("** Update User Data **")
 
 	if c.currentUser == "" || c.authToken == "" {
-		fmt.Println("No estás logueado. Inicia sesión primero.")
+		fmt.Println("Not logged in. Please log in first.")
 		return
 	}
 
-	// Leemos la nueva Data
-	newData := ui.ReadInput("Introduce el contenido que desees almacenar")
+	// Read the new data.
+	newData := ui.ReadInput("Enter the content to store")
 
-	// Enviamos la solicitud de actualización
+	// Send the update request.
 	res := c.sendRequest(api.Request{
 		Action:   api.ActionUpdateData,
 		Username: c.currentUser,
@@ -218,50 +214,51 @@ func (c *client) updateData() {
 		Data:     newData,
 	})
 
-	fmt.Println("Éxito:", res.Success)
-	fmt.Println("Mensaje:", res.Message)
+	fmt.Println("Success:", res.Success)
+	fmt.Println("Message:", res.Message)
 }
 
-// logoutUser llama a la acción logout en el servidor, y si es exitosa,
-// borra la sesión local (currentUser/authToken).
+// logoutUser calls the logout action on the server, and if successful,
+// clears the local session (currentUser/authToken).
 func (c *client) logoutUser() {
 	ui.ClearScreen()
-	fmt.Println("** Cerrar sesión **")
+	fmt.Println("** Logout **")
 
 	if c.currentUser == "" || c.authToken == "" {
-		fmt.Println("No estás logueado.")
+		fmt.Println("Not logged in.")
 		return
 	}
 
-	// Llamamos al servidor con la acción ActionLogout
+	// Send the logout request.
 	res := c.sendRequest(api.Request{
 		Action:   api.ActionLogout,
 		Username: c.currentUser,
 		Token:    c.authToken,
 	})
 
-	fmt.Println("Éxito:", res.Success)
-	fmt.Println("Mensaje:", res.Message)
+	fmt.Println("Success:", res.Success)
+	fmt.Println("Message:", res.Message)
 
-	// Si fue exitoso, limpiamos la sesión local.
+	// If successful, clear the local session.
 	if res.Success {
 		c.currentUser = ""
 		c.authToken = ""
 	}
 }
 
-// sendRequest envía un POST JSON a la URL del servidor y
-// devuelve la respuesta decodificada. Se usa para todas las acciones.
+// sendRequest sends a JSON POST to the server URL and returns the decoded response.
+// It is used for all actions.
 func (c *client) sendRequest(req api.Request) api.Response {
 	jsonData, _ := json.Marshal(req)
-	resp, err := http.Post("http://localhost:8080/api", "application/json", bytes.NewBuffer(jsonData))
+	// Use HTTPS for secure transport.
+	resp, err := http.Post("https://localhost:8080/api", "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
-		fmt.Println("Error al contactar con el servidor:", err)
-		return api.Response{Success: false, Message: "Error de conexión"}
+		fmt.Println("Error contacting the server:", err)
+		return api.Response{Success: false, Message: "Connection error"}
 	}
 	defer resp.Body.Close()
 
-	// Leemos el body de respuesta y lo desempaquetamos en un api.Response
+	// Read the response body and unmarshal into an api.Response.
 	body, _ := io.ReadAll(resp.Body)
 	var res api.Response
 	_ = json.Unmarshal(body, &res)
