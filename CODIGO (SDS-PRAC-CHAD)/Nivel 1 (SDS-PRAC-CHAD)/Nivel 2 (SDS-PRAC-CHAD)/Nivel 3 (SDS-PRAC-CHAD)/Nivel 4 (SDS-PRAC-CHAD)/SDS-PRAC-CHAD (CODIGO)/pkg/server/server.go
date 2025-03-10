@@ -3,23 +3,35 @@
 package server
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strings"
-	"sync/atomic"
 
 	"prac/pkg/api"
 	"prac/pkg/store"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // server encapsulates the state of our server.
 type server struct {
-	db           store.Store // database
-	log          *log.Logger // logger for error and info messages
-	tokenCounter int64       // counter to generate tokens
+	db  store.Store // database
+	log *log.Logger // logger for error and info messages
+}
+
+// generateSecureToken creates a secure random token of 16 bytes and returns it as a hex string.
+func generateSecureToken() (string, error) {
+	b := make([]byte, 16)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // Run starts the database and the HTTPS server.
@@ -44,6 +56,7 @@ func Run() error {
 	mux.Handle("/api", http.HandlerFunc(srv.apiHandler))
 
 	// Start the HTTPS server on port 8080 using TLS.
+	// Make sure to place server.crt and server.key inside a "certs" folder at the project root.
 	err = http.ListenAndServeTLS(":8080", "certs/server.crt", "certs/server.key", mux)
 	return err
 }
@@ -85,14 +98,9 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(res)
 }
 
-// generateToken creates a unique token by incrementing an internal counter (not very secure).
-func (s *server) generateToken() string {
-	id := atomic.AddInt64(&s.tokenCounter, 1)
-	return fmt.Sprintf("token_%d", id)
-}
-
 // registerUser registers a new user if they do not exist.
-// It stores the password in the 'auth' namespace and creates an empty entry in 'userdata' for the user.
+// It hashes the password using bcrypt, stores it in the 'auth' namespace,
+// and creates an empty entry in 'userdata' for the user.
 func (s *server) registerUser(req api.Request) api.Response {
 	// Basic validation.
 	if req.Username == "" || req.Password == "" {
@@ -108,8 +116,14 @@ func (s *server) registerUser(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "User already exists"}
 	}
 
-	// Store the password in the 'auth' namespace (key=username, value=password).
-	if err := s.db.Put("auth", []byte(req.Username), []byte(req.Password)); err != nil {
+	// Hash the password using bcrypt.
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error hashing password"}
+	}
+
+	// Store the hashed password in the 'auth' namespace (key=username, value=hashed password).
+	if err := s.db.Put("auth", []byte(req.Username), hashedPassword); err != nil {
 		return api.Response{Success: false, Message: "Error saving credentials"}
 	}
 
@@ -121,25 +135,30 @@ func (s *server) registerUser(req api.Request) api.Response {
 	return api.Response{Success: true, Message: "User registered"}
 }
 
-// loginUser validates credentials in the 'auth' namespace and generates a token in 'sessions'.
+// loginUser validates credentials in the 'auth' namespace and generates a secure token in 'sessions'.
 func (s *server) loginUser(req api.Request) api.Response {
 	if req.Username == "" || req.Password == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
 
-	// Retrieve the stored password from 'auth'.
-	storedPass, err := s.db.Get("auth", []byte(req.Username))
+	// Retrieve the stored hashed password from 'auth'.
+	storedHash, err := s.db.Get("auth", []byte(req.Username))
 	if err != nil {
 		return api.Response{Success: false, Message: "User not found"}
 	}
 
-	// Compare passwords.
-	if string(storedPass) != req.Password {
+	// Compare the stored hash with the password provided.
+	if err := bcrypt.CompareHashAndPassword(storedHash, []byte(req.Password)); err != nil {
 		return api.Response{Success: false, Message: "Invalid credentials"}
 	}
 
-	// Generate a new token and store it in 'sessions'.
-	token := s.generateToken()
+	// Generate a secure random token.
+	token, err := generateSecureToken()
+	if err != nil {
+		return api.Response{Success: false, Message: "Error generating token"}
+	}
+
+	// Store the token in the 'sessions' namespace.
 	if err := s.db.Put("sessions", []byte(req.Username), []byte(token)); err != nil {
 		return api.Response{Success: false, Message: "Error creating session"}
 	}
@@ -149,7 +168,6 @@ func (s *server) loginUser(req api.Request) api.Response {
 
 // fetchData verifies the token and returns the content from the 'userdata' namespace.
 func (s *server) fetchData(req api.Request) api.Response {
-	// Check credentials.
 	if req.Username == "" || req.Token == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
@@ -170,9 +188,8 @@ func (s *server) fetchData(req api.Request) api.Response {
 	}
 }
 
-// updateData updates the content of 'userdata' (the user's data) after verifying the token.
+// updateData updates the content of 'userdata' after verifying the token.
 func (s *server) updateData(req api.Request) api.Response {
-	// Check credentials.
 	if req.Username == "" || req.Token == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
@@ -180,7 +197,7 @@ func (s *server) updateData(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Invalid or expired token"}
 	}
 
-	// Update the user data in 'userdata'.
+	// Store the new data.
 	if err := s.db.Put("userdata", []byte(req.Username), []byte(req.Data)); err != nil {
 		return api.Response{Success: false, Message: "Error updating user data"}
 	}
@@ -190,7 +207,6 @@ func (s *server) updateData(req api.Request) api.Response {
 
 // logoutUser deletes the session in 'sessions', invalidating the token.
 func (s *server) logoutUser(req api.Request) api.Response {
-	// Check credentials.
 	if req.Username == "" || req.Token == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
