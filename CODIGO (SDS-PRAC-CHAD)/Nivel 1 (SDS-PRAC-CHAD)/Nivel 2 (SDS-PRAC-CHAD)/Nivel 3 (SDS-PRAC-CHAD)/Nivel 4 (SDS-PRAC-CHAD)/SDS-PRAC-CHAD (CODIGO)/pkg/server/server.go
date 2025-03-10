@@ -3,35 +3,98 @@
 package server
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"prac/pkg/api"
 	"prac/pkg/store"
 
+	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// server encapsulates the state of our server.
-type server struct {
-	db  store.Store // database
-	log *log.Logger // logger for error and info messages
+var (
+	privateKey *rsa.PrivateKey
+	publicKey  *rsa.PublicKey
+)
+
+// init loads the RSA private and public keys from the "keys" folder.
+func init() {
+	// Load private key from keys/private.pem
+	privBytes, err := ioutil.ReadFile("keys/private.pem")
+	if err != nil {
+		log.Fatalf("Error reading private key: %v", err)
+	}
+	block, _ := pem.Decode(privBytes)
+	if block == nil {
+		log.Fatal("Failed to parse PEM block containing the private key")
+	}
+	// First try to parse as PKCS1
+	parsedKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		// If that fails, try PKCS8
+		keyInterface, err2 := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err2 != nil {
+			log.Fatalf("Error parsing private key: %v", err2)
+		}
+		var ok bool
+		privateKey, ok = keyInterface.(*rsa.PrivateKey)
+		if !ok {
+			log.Fatal("Private key is not of type RSA")
+		}
+	} else {
+		privateKey = parsedKey
+	}
+
+	// Load public key from keys/public.pem
+	pubBytes, err := ioutil.ReadFile("keys/public.pem")
+	if err != nil {
+		log.Fatalf("Error reading public key: %v", err)
+	}
+	block, _ = pem.Decode(pubBytes)
+	if block == nil {
+		log.Fatal("Failed to parse PEM block containing the public key")
+	}
+	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		log.Fatalf("Error parsing public key: %v", err)
+	}
+	var ok bool
+	publicKey, ok = pub.(*rsa.PublicKey)
+	if !ok {
+		log.Fatal("Public key is not of type RSA")
+	}
 }
 
-// generateSecureToken creates a secure random token of 16 bytes and returns it as a hex string.
-func generateSecureToken() (string, error) {
-	b := make([]byte, 16)
-	_, err := rand.Read(b)
+// generateJWT creates a JWT token for the given username using RS256.
+func generateJWT(username string) (string, error) {
+	claims := jwt.StandardClaims{
+		Subject:   username,
+		ExpiresAt: time.Now().Add(24 * time.Hour).Unix(),
+		IssuedAt:  time.Now().Unix(),
+		Issuer:    "prac-server",
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	tokenString, err := token.SignedString(privateKey)
 	if err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(b), nil
+	return tokenString, nil
+}
+
+// serverImpl encapsulates the state of our server.
+type serverImpl struct {
+	db  store.Store // database
+	log *log.Logger // logger for error and info messages
 }
 
 // Run starts the database and the HTTPS server.
@@ -43,7 +106,7 @@ func Run() error {
 	}
 
 	// Create our server with a logger with prefix 'srv'.
-	srv := &server{
+	srv := &serverImpl{
 		db:  db,
 		log: log.New(os.Stdout, "[srv] ", log.LstdFlags),
 	}
@@ -56,14 +119,13 @@ func Run() error {
 	mux.Handle("/api", http.HandlerFunc(srv.apiHandler))
 
 	// Start the HTTPS server on port 8080 using TLS.
-	// Make sure to place server.crt and server.key inside a "certs" folder at the project root.
 	err = http.ListenAndServeTLS(":8080", "certs/server.crt", "certs/server.key", mux)
 	return err
 }
 
 // apiHandler decodes the JSON request, dispatches it to the corresponding function,
 // and returns the JSON response.
-func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
+func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -99,9 +161,9 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // registerUser registers a new user if they do not exist.
-// It hashes the password using bcrypt, stores it in the 'auth' namespace,
-// and creates an empty entry in 'userdata' for the user.
-func (s *server) registerUser(req api.Request) api.Response {
+// It hashes the password using bcrypt and stores it in the 'auth' namespace.
+// It also creates an empty entry in 'userdata' for the user.
+func (s *serverImpl) registerUser(req api.Request) api.Response {
 	// Basic validation.
 	if req.Username == "" || req.Password == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
@@ -122,7 +184,7 @@ func (s *server) registerUser(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error hashing password"}
 	}
 
-	// Store the hashed password in the 'auth' namespace (key=username, value=hashed password).
+	// Store the hashed password in the 'auth' namespace.
 	if err := s.db.Put("auth", []byte(req.Username), hashedPassword); err != nil {
 		return api.Response{Success: false, Message: "Error saving credentials"}
 	}
@@ -135,8 +197,8 @@ func (s *server) registerUser(req api.Request) api.Response {
 	return api.Response{Success: true, Message: "User registered"}
 }
 
-// loginUser validates credentials in the 'auth' namespace and generates a secure token in 'sessions'.
-func (s *server) loginUser(req api.Request) api.Response {
+// loginUser validates credentials in the 'auth' namespace and generates a JWT token in 'sessions'.
+func (s *serverImpl) loginUser(req api.Request) api.Response {
 	if req.Username == "" || req.Password == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
@@ -147,13 +209,13 @@ func (s *server) loginUser(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "User not found"}
 	}
 
-	// Compare the stored hash with the password provided.
+	// Compare the stored hash with the provided password.
 	if err := bcrypt.CompareHashAndPassword(storedHash, []byte(req.Password)); err != nil {
 		return api.Response{Success: false, Message: "Invalid credentials"}
 	}
 
-	// Generate a secure random token.
-	token, err := generateSecureToken()
+	// Generate a JWT token using RS256.
+	token, err := generateJWT(req.Username)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error generating token"}
 	}
@@ -166,8 +228,8 @@ func (s *server) loginUser(req api.Request) api.Response {
 	return api.Response{Success: true, Message: "Login successful", Token: token}
 }
 
-// fetchData verifies the token and returns the content from the 'userdata' namespace.
-func (s *server) fetchData(req api.Request) api.Response {
+// fetchData verifies the JWT token and returns the content from the 'userdata' namespace.
+func (s *serverImpl) fetchData(req api.Request) api.Response {
 	if req.Username == "" || req.Token == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
@@ -175,7 +237,7 @@ func (s *server) fetchData(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Invalid or expired token"}
 	}
 
-	// Retrieve the data associated with the user from 'userdata'.
+	// Retrieve the user data from 'userdata'.
 	rawData, err := s.db.Get("userdata", []byte(req.Username))
 	if err != nil {
 		return api.Response{Success: false, Message: "Error retrieving user data"}
@@ -188,8 +250,8 @@ func (s *server) fetchData(req api.Request) api.Response {
 	}
 }
 
-// updateData updates the content of 'userdata' after verifying the token.
-func (s *server) updateData(req api.Request) api.Response {
+// updateData updates the content of 'userdata' after verifying the JWT token.
+func (s *serverImpl) updateData(req api.Request) api.Response {
 	if req.Username == "" || req.Token == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
@@ -197,7 +259,7 @@ func (s *server) updateData(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Invalid or expired token"}
 	}
 
-	// Store the new data.
+	// Update the user data in 'userdata'.
 	if err := s.db.Put("userdata", []byte(req.Username), []byte(req.Data)); err != nil {
 		return api.Response{Success: false, Message: "Error updating user data"}
 	}
@@ -205,8 +267,8 @@ func (s *server) updateData(req api.Request) api.Response {
 	return api.Response{Success: true, Message: "User data updated"}
 }
 
-// logoutUser deletes the session in 'sessions', invalidating the token.
-func (s *server) logoutUser(req api.Request) api.Response {
+// logoutUser deletes the session in 'sessions', invalidating the JWT token.
+func (s *serverImpl) logoutUser(req api.Request) api.Response {
 	if req.Username == "" || req.Token == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
@@ -224,7 +286,7 @@ func (s *server) logoutUser(req api.Request) api.Response {
 
 // userExists checks if a user exists in the 'auth' namespace.
 // Returns false if the user is not found.
-func (s *server) userExists(username string) (bool, error) {
+func (s *serverImpl) userExists(username string) (bool, error) {
 	_, err := s.db.Get("auth", []byte(username))
 	if err != nil {
 		if strings.Contains(err.Error(), "bucket no encontrado: auth") {
@@ -238,11 +300,24 @@ func (s *server) userExists(username string) (bool, error) {
 	return true, nil
 }
 
-// isTokenValid checks if the token stored in 'sessions' matches the provided token.
-func (s *server) isTokenValid(username, token string) bool {
+// isTokenValid checks if the JWT token stored in 'sessions' matches the provided token
+// and verifies its signature using the public key.
+func (s *serverImpl) isTokenValid(username, token string) bool {
 	storedToken, err := s.db.Get("sessions", []byte(username))
 	if err != nil {
 		return false
 	}
-	return string(storedToken) == token
+	if string(storedToken) != token {
+		return false
+	}
+	parsedToken, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return publicKey, nil
+	})
+	if err != nil || !parsedToken.Valid {
+		return false
+	}
+	return true
 }
