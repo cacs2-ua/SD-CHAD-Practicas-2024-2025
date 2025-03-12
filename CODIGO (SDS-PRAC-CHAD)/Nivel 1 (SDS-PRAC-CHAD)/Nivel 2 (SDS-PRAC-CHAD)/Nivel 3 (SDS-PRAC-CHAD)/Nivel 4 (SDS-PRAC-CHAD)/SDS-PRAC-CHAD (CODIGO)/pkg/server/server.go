@@ -1,7 +1,7 @@
 package server
 
 import (
-	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -21,11 +21,11 @@ import (
 )
 
 var (
-	privateKey *ecdsa.PrivateKey
-	publicKey  *ecdsa.PublicKey
+	privateKey ed25519.PrivateKey
+	publicKey  ed25519.PublicKey
 )
 
-// init loads the ECDSA private and public keys from the "keys" folder.
+// init loads the Ed25519 private and public keys from the "keys" folder.
 func init() {
 	// Load private key from keys/private.pem
 	privBytes, err := ioutil.ReadFile("keys/private.pem")
@@ -36,21 +36,14 @@ func init() {
 	if block == nil {
 		log.Fatal("Failed to parse PEM block containing the private key")
 	}
-	// Try to parse as EC private key (PKCS1 or PKCS8)
-	parsedKey, err := x509.ParseECPrivateKey(block.Bytes)
+	keyInterface, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		// If that fails, try PKCS8
-		keyInterface, err2 := x509.ParsePKCS8PrivateKey(block.Bytes)
-		if err2 != nil {
-			log.Fatalf("Error parsing private key: %v", err2)
-		}
-		var ok bool
-		privateKey, ok = keyInterface.(*ecdsa.PrivateKey)
-		if !ok {
-			log.Fatal("Private key is not of type ECDSA")
-		}
-	} else {
-		privateKey = parsedKey
+		log.Fatalf("Error parsing private key: %v", err)
+	}
+	var ok bool
+	privateKey, ok = keyInterface.(ed25519.PrivateKey)
+	if !ok {
+		log.Fatal("Private key is not of type Ed25519")
 	}
 
 	// Load public key from keys/public.pem
@@ -66,10 +59,9 @@ func init() {
 	if err != nil {
 		log.Fatalf("Error parsing public key: %v", err)
 	}
-	var ok bool
-	publicKey, ok = pubInterface.(*ecdsa.PublicKey)
+	publicKey, ok = pubInterface.(ed25519.PublicKey)
 	if !ok {
-		log.Fatal("Public key is not of type ECDSA")
+		log.Fatal("Public key is not of type Ed25519")
 	}
 }
 
@@ -81,7 +73,7 @@ func generateAccessToken(username string) (string, error) {
 		IssuedAt:  time.Now().Unix(),
 		Issuer:    "prac-server",
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
 	tokenString, err := token.SignedString(privateKey)
 	if err != nil {
 		return "", err
@@ -97,7 +89,7 @@ func generateRefreshToken(username string) (string, error) {
 		IssuedAt:  time.Now().Unix(),
 		Issuer:    "prac-server",
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
 	tokenString, err := token.SignedString(privateKey)
 	if err != nil {
 		return "", err
@@ -272,7 +264,8 @@ func (s *serverImpl) refreshToken(req api.Request) api.Response {
 
 	// Optionally, verify the refresh token's expiration.
 	token, err := jwt.Parse(req.RefreshToken, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodECDSA); !ok {
+		// Use the actual type *jwt.SigningMethodEd25519 in the type assertion.
+		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
 		return publicKey, nil
@@ -374,7 +367,8 @@ func (s *serverImpl) userExists(username string) (bool, error) {
 // isAccessTokenValid verifies the access token's signature and expiration.
 func (s *serverImpl) isAccessTokenValid(username, tokenString string) bool {
 	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodECDSA); !ok {
+		// Use the actual type *jwt.SigningMethodEd25519 in the type assertion.
+		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
 		return publicKey, nil
