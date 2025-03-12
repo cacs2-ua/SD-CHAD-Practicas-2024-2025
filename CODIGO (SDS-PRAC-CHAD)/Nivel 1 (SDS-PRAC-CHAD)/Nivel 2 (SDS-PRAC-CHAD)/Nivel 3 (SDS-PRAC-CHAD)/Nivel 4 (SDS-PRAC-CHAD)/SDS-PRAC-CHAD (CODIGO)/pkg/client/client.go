@@ -70,11 +70,11 @@ func parseTokenExpiry(tokenStr string) (time.Time, error) {
 func (c *client) runLoop() {
 	// Start a background goroutine to auto-refresh the access token.
 	go func() {
-		ticker := time.NewTicker(3 * time.Second) // ticker interval set to 3 seconds for debugging
+		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
 			if c.currentUser != "" && c.authToken != "" && !c.accessTokenExpiry.IsZero() {
-				if time.Until(c.accessTokenExpiry) < 10*time.Second { // refresh when less than 10 seconds remain
+				if time.Until(c.accessTokenExpiry) < 10*time.Second {
 					c.log.Println("Auto refreshing token...")
 					c.refreshAccessToken()
 				}

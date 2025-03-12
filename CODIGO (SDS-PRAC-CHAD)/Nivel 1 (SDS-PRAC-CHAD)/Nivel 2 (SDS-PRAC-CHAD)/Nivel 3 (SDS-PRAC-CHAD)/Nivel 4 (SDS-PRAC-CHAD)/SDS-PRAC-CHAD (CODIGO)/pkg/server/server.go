@@ -77,7 +77,7 @@ func init() {
 func generateAccessToken(username string) (string, error) {
 	claims := jwt.StandardClaims{
 		Subject:   username,
-		ExpiresAt: time.Now().Add(30 * time.Second).Unix(), // expiration set to 30 seconds for debugging
+		ExpiresAt: time.Now().Add(time.Minute).Unix(),
 		IssuedAt:  time.Now().Unix(),
 		Issuer:    "prac-server",
 	}
