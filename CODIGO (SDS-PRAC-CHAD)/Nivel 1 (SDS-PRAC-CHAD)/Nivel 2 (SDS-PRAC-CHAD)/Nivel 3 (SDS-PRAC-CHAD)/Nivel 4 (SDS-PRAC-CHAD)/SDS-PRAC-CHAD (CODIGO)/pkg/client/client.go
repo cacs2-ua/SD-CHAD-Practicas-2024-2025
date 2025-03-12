@@ -9,19 +9,22 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	"prac/pkg/api"
 	"prac/pkg/crypto"
 	"prac/pkg/ui"
 )
 
-// client is an internal structure that controls the session state (user, token)
+// client is an internal structure that controls the session state (user, tokens)
 // and holds the encryption key for end-to-end encryption.
 type client struct {
 	log               *log.Logger
 	currentUser       string
 	authToken         string // access token
 	refreshToken      string // refresh token
+	accessTokenExpiry time.Time
 	encryptionKey     []byte
 	plaintextPassword string // temporarily store password for key derivation
 }
@@ -36,9 +39,49 @@ func Run() {
 	c.runLoop()
 }
 
+// parseTokenExpiry extracts the expiration time from a JWT access token.
+// It decodes the token payload (the second part) and returns the expiry as time.Time.
+func parseTokenExpiry(tokenStr string) (time.Time, error) {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) < 2 {
+		return time.Time{}, fmt.Errorf("invalid token format")
+	}
+	payload := parts[1]
+	// add padding if needed
+	missing := len(payload) % 4
+	if missing != 0 {
+		payload += strings.Repeat("=", 4-missing)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return time.Time{}, err
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(decoded, &claims); err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(claims.Exp, 0), nil
+}
+
 // runLoop handles the main menu logic.
-// Different options are shown depending on whether a user is logged in.
+// It also starts a background goroutine to automatically refresh the access token.
 func (c *client) runLoop() {
+	// Start a background goroutine to auto-refresh the access token.
+	go func() {
+		ticker := time.NewTicker(3 * time.Second) // ticker interval set to 3 seconds for debugging
+		defer ticker.Stop()
+		for range ticker.C {
+			if c.currentUser != "" && c.authToken != "" && !c.accessTokenExpiry.IsZero() {
+				if time.Until(c.accessTokenExpiry) < 10*time.Second { // refresh when less than 10 seconds remain
+					c.log.Println("Auto refreshing token...")
+					c.refreshAccessToken()
+				}
+			}
+		}
+	}()
+
 	for {
 		ui.ClearScreen()
 
@@ -60,11 +103,10 @@ func (c *client) runLoop() {
 				"Exit",
 			}
 		} else {
-			// Logged in: View data, Update data, Refresh token, Logout, Exit
+			// Logged in: View data, Update data, Logout, Exit
 			options = []string{
 				"View data",
 				"Update data",
-				"Refresh token",
 				"Logout",
 				"Exit",
 			}
@@ -94,10 +136,8 @@ func (c *client) runLoop() {
 			case 2:
 				c.updateData()
 			case 3:
-				c.refreshAccessToken()
-			case 4:
 				c.logoutUser()
-			case 5:
+			case 4:
 				// Exit option.
 				c.log.Println("Exiting client...")
 				return
@@ -149,6 +189,13 @@ func (c *client) registerUser() {
 				return
 			}
 			c.encryptionKey = key
+			// Parse and store the access token expiry.
+			expiry, err := parseTokenExpiry(c.authToken)
+			if err != nil {
+				fmt.Println("Error parsing token expiry:", err)
+			} else {
+				c.accessTokenExpiry = expiry
+			}
 			// Store the plaintext password temporarily for future key derivation.
 			c.plaintextPassword = password
 			fmt.Println("Automatic login successful. Tokens and encryption key saved.")
@@ -187,30 +234,45 @@ func (c *client) loginUser() {
 			return
 		}
 		c.encryptionKey = key
+		// Parse and store the access token expiry.
+		expiry, err := parseTokenExpiry(c.authToken)
+		if err != nil {
+			fmt.Println("Error parsing token expiry:", err)
+		} else {
+			c.accessTokenExpiry = expiry
+		}
 		// Store the plaintext password temporarily.
 		c.plaintextPassword = password
 		fmt.Println("Login successful. Tokens and encryption key saved.")
 	}
 }
 
-// refreshAccessToken requests new tokens using the refresh token.
+// refreshAccessToken automatically requests new tokens using the refresh token.
 func (c *client) refreshAccessToken() {
-	ui.ClearScreen()
-	fmt.Println("** Refresh Access Token **")
-
+	// Do not proceed if there is no valid refresh token.
+	if c.currentUser == "" || c.refreshToken == "" {
+		return
+	}
 	res := c.sendRequest(api.Request{
 		Action:       api.ActionRefresh,
 		Username:     c.currentUser,
 		RefreshToken: c.refreshToken,
 	})
 
-	fmt.Println("Success:", res.Success)
-	fmt.Println("Message:", res.Message)
+	fmt.Println("Auto refresh - Success:", res.Success)
+	fmt.Println("Auto refresh - Message:", res.Message)
 
 	if res.Success {
 		c.authToken = res.Token
 		c.refreshToken = res.RefreshToken
-		fmt.Println("Token refreshed successfully.")
+		// Update the access token expiry.
+		expiry, err := parseTokenExpiry(c.authToken)
+		if err != nil {
+			fmt.Println("Error parsing token expiry:", err)
+		} else {
+			c.accessTokenExpiry = expiry
+		}
+		fmt.Println("Token refreshed automatically.")
 	}
 }
 
@@ -319,6 +381,7 @@ func (c *client) logoutUser() {
 		c.currentUser = ""
 		c.authToken = ""
 		c.refreshToken = ""
+		c.accessTokenExpiry = time.Time{}
 		c.encryptionKey = nil
 		c.plaintextPassword = ""
 	}

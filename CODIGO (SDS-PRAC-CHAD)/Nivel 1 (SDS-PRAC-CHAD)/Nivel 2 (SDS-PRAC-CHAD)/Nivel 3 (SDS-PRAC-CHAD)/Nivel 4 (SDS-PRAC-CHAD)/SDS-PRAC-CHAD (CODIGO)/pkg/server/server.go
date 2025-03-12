@@ -73,11 +73,11 @@ func init() {
 	}
 }
 
-// generateAccessToken creates an access JWT for the given username with short expiration (15 minutes).
+// generateAccessToken creates an access JWT for the given username with short expiration (30 seconds).
 func generateAccessToken(username string) (string, error) {
 	claims := jwt.StandardClaims{
 		Subject:   username,
-		ExpiresAt: time.Now().Add(15 * time.Minute).Unix(),
+		ExpiresAt: time.Now().Add(30 * time.Second).Unix(), // expiration set to 30 seconds for debugging
 		IssuedAt:  time.Now().Unix(),
 		Issuer:    "prac-server",
 	}
@@ -230,7 +230,7 @@ func (s *serverImpl) loginUser(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Invalid credentials"}
 	}
 
-	// Generate an access token (15 minutes expiration).
+	// Generate an access token (30 seconds expiration for debugging).
 	accessToken, err := generateAccessToken(req.Username)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error generating access token"}
