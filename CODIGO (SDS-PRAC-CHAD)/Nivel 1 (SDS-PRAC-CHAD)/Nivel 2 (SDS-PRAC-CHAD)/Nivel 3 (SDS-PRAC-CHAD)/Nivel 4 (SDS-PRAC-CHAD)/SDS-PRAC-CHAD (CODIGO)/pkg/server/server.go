@@ -1,5 +1,3 @@
-// Package server contains the server code.
-// It interacts with the client via a JSON/HTTP API.
 package server
 
 import (
@@ -75,11 +73,27 @@ func init() {
 	}
 }
 
-// generateJWT creates a JWT token for the given username using RS256.
-func generateJWT(username string) (string, error) {
+// generateAccessToken creates an access JWT for the given username with short expiration (15 minutes).
+func generateAccessToken(username string) (string, error) {
 	claims := jwt.StandardClaims{
 		Subject:   username,
-		ExpiresAt: time.Now().Add(24 * time.Hour).Unix(),
+		ExpiresAt: time.Now().Add(15 * time.Minute).Unix(),
+		IssuedAt:  time.Now().Unix(),
+		Issuer:    "prac-server",
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	tokenString, err := token.SignedString(privateKey)
+	if err != nil {
+		return "", err
+	}
+	return tokenString, nil
+}
+
+// generateRefreshToken creates a refresh JWT for the given username with longer expiration (7 days).
+func generateRefreshToken(username string) (string, error) {
+	claims := jwt.StandardClaims{
+		Subject:   username,
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour).Unix(),
 		IssuedAt:  time.Now().Unix(),
 		Issuer:    "prac-server",
 	}
@@ -145,6 +159,8 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res = s.registerUser(req)
 	case api.ActionLogin:
 		res = s.loginUser(req)
+	case api.ActionRefresh:
+		res = s.refreshToken(req)
 	case api.ActionFetchData:
 		res = s.fetchData(req)
 	case api.ActionUpdateData:
@@ -197,7 +213,7 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	return api.Response{Success: true, Message: "User registered"}
 }
 
-// loginUser validates credentials in the 'auth' namespace and generates a JWT token in 'sessions'.
+// loginUser validates credentials in the 'auth' namespace and generates access and refresh tokens.
 func (s *serverImpl) loginUser(req api.Request) api.Response {
 	if req.Username == "" || req.Password == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
@@ -214,27 +230,87 @@ func (s *serverImpl) loginUser(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Invalid credentials"}
 	}
 
-	// Generate a JWT token using RS256.
-	token, err := generateJWT(req.Username)
+	// Generate an access token (15 minutes expiration).
+	accessToken, err := generateAccessToken(req.Username)
 	if err != nil {
-		return api.Response{Success: false, Message: "Error generating token"}
+		return api.Response{Success: false, Message: "Error generating access token"}
 	}
 
-	// Store the token in the 'sessions' namespace.
-	if err := s.db.Put("sessions", []byte(req.Username), []byte(token)); err != nil {
-		return api.Response{Success: false, Message: "Error creating session"}
+	// Generate a refresh token (7 days expiration).
+	refreshToken, err := generateRefreshToken(req.Username)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error generating refresh token"}
 	}
 
-	return api.Response{Success: true, Message: "Login successful", Token: token}
+	// Store the refresh token in the 'refresh' namespace.
+	if err := s.db.Put("refresh", []byte(req.Username), []byte(refreshToken)); err != nil {
+		return api.Response{Success: false, Message: "Error saving refresh token"}
+	}
+
+	return api.Response{
+		Success:      true,
+		Message:      "Login successful",
+		Token:        accessToken,
+		RefreshToken: refreshToken,
+	}
 }
 
-// fetchData verifies the JWT token and returns the content from the 'userdata' namespace.
+// refreshToken validates the refresh token and generates new tokens.
+func (s *serverImpl) refreshToken(req api.Request) api.Response {
+	if req.Username == "" || req.RefreshToken == "" {
+		return api.Response{Success: false, Message: "Missing credentials"}
+	}
+
+	// Retrieve stored refresh token from 'refresh' namespace.
+	storedToken, err := s.db.Get("refresh", []byte(req.Username))
+	if err != nil {
+		return api.Response{Success: false, Message: "Refresh token not found"}
+	}
+	if string(storedToken) != req.RefreshToken {
+		return api.Response{Success: false, Message: "Invalid refresh token"}
+	}
+
+	// Optionally, verify the refresh token's expiration.
+	token, err := jwt.Parse(req.RefreshToken, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return publicKey, nil
+	})
+	if err != nil || !token.Valid {
+		return api.Response{Success: false, Message: "Expired or invalid refresh token"}
+	}
+
+	// Generate new tokens.
+	newAccessToken, err := generateAccessToken(req.Username)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error generating new access token"}
+	}
+	newRefreshToken, err := generateRefreshToken(req.Username)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error generating new refresh token"}
+	}
+
+	// Update the refresh token in the 'refresh' namespace (token rotation).
+	if err := s.db.Put("refresh", []byte(req.Username), []byte(newRefreshToken)); err != nil {
+		return api.Response{Success: false, Message: "Error updating refresh token"}
+	}
+
+	return api.Response{
+		Success:      true,
+		Message:      "Tokens refreshed successfully",
+		Token:        newAccessToken,
+		RefreshToken: newRefreshToken,
+	}
+}
+
+// fetchData verifies the access token and returns the content from the 'userdata' namespace.
 func (s *serverImpl) fetchData(req api.Request) api.Response {
 	if req.Username == "" || req.Token == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
-	if !s.isTokenValid(req.Username, req.Token) {
-		return api.Response{Success: false, Message: "Invalid or expired token"}
+	if !s.isAccessTokenValid(req.Username, req.Token) {
+		return api.Response{Success: false, Message: "Invalid or expired access token"}
 	}
 
 	// Retrieve the user data from 'userdata'.
@@ -250,13 +326,13 @@ func (s *serverImpl) fetchData(req api.Request) api.Response {
 	}
 }
 
-// updateData updates the content of 'userdata' after verifying the JWT token.
+// updateData updates the content of 'userdata' after verifying the access token.
 func (s *serverImpl) updateData(req api.Request) api.Response {
 	if req.Username == "" || req.Token == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
-	if !s.isTokenValid(req.Username, req.Token) {
-		return api.Response{Success: false, Message: "Invalid or expired token"}
+	if !s.isAccessTokenValid(req.Username, req.Token) {
+		return api.Response{Success: false, Message: "Invalid or expired access token"}
 	}
 
 	// Update the user data in 'userdata'.
@@ -267,20 +343,15 @@ func (s *serverImpl) updateData(req api.Request) api.Response {
 	return api.Response{Success: true, Message: "User data updated"}
 }
 
-// logoutUser deletes the session in 'sessions', invalidating the JWT token.
+// logoutUser deletes the refresh token, invalidating the session.
 func (s *serverImpl) logoutUser(req api.Request) api.Response {
-	if req.Username == "" || req.Token == "" {
+	if req.Username == "" || req.RefreshToken == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
-	if !s.isTokenValid(req.Username, req.Token) {
-		return api.Response{Success: false, Message: "Invalid or expired token"}
-	}
-
-	// Delete the session entry in 'sessions'.
-	if err := s.db.Delete("sessions", []byte(req.Username)); err != nil {
+	// Delete the refresh token from 'refresh' namespace.
+	if err := s.db.Delete("refresh", []byte(req.Username)); err != nil {
 		return api.Response{Success: false, Message: "Error closing session"}
 	}
-
 	return api.Response{Success: true, Message: "Session closed successfully"}
 }
 
@@ -300,23 +371,23 @@ func (s *serverImpl) userExists(username string) (bool, error) {
 	return true, nil
 }
 
-// isTokenValid checks if the JWT token stored in 'sessions' matches the provided token
-// and verifies its signature using the public key.
-func (s *serverImpl) isTokenValid(username, token string) bool {
-	storedToken, err := s.db.Get("sessions", []byte(username))
-	if err != nil {
-		return false
-	}
-	if string(storedToken) != token {
-		return false
-	}
-	parsedToken, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
+// isAccessTokenValid verifies the access token's signature and expiration.
+func (s *serverImpl) isAccessTokenValid(username, tokenString string) bool {
+	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
 		return publicKey, nil
 	})
-	if err != nil || !parsedToken.Valid {
+	if err != nil || !token.Valid {
+		return false
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return false
+	}
+	// Check that subject matches username.
+	if claims["sub"] != username {
 		return false
 	}
 	return true

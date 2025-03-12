@@ -1,4 +1,3 @@
-// Package client contains the user interaction logic and communication with the server.
 package client
 
 import (
@@ -21,7 +20,8 @@ import (
 type client struct {
 	log               *log.Logger
 	currentUser       string
-	authToken         string
+	authToken         string // access token
+	refreshToken      string // refresh token
 	encryptionKey     []byte
 	plaintextPassword string // temporarily store password for key derivation
 }
@@ -60,10 +60,11 @@ func (c *client) runLoop() {
 				"Exit",
 			}
 		} else {
-			// Logged in: View data, Update data, Logout, Exit
+			// Logged in: View data, Update data, Refresh token, Logout, Exit
 			options = []string{
 				"View data",
 				"Update data",
+				"Refresh token",
 				"Logout",
 				"Exit",
 			}
@@ -93,8 +94,10 @@ func (c *client) runLoop() {
 			case 2:
 				c.updateData()
 			case 3:
-				c.logoutUser()
+				c.refreshAccessToken()
 			case 4:
+				c.logoutUser()
+			case 5:
 				// Exit option.
 				c.log.Println("Exiting client...")
 				return
@@ -138,6 +141,7 @@ func (c *client) registerUser() {
 		if loginRes.Success {
 			c.currentUser = username
 			c.authToken = loginRes.Token
+			c.refreshToken = loginRes.RefreshToken
 			// Derive the encryption key using the password and username.
 			key, err := crypto.DeriveKey(password, username)
 			if err != nil {
@@ -147,7 +151,7 @@ func (c *client) registerUser() {
 			c.encryptionKey = key
 			// Store the plaintext password temporarily for future key derivation.
 			c.plaintextPassword = password
-			fmt.Println("Automatic login successful. Token and encryption key saved.")
+			fmt.Println("Automatic login successful. Tokens and encryption key saved.")
 		} else {
 			fmt.Println("Automatic login failed:", loginRes.Message)
 		}
@@ -171,10 +175,11 @@ func (c *client) loginUser() {
 	fmt.Println("Success:", res.Success)
 	fmt.Println("Message:", res.Message)
 
-	// If login is successful, save currentUser and the token.
+	// If login is successful, save currentUser and the tokens.
 	if res.Success {
 		c.currentUser = username
 		c.authToken = res.Token
+		c.refreshToken = res.RefreshToken
 		// Derive the encryption key using the password and username.
 		key, err := crypto.DeriveKey(password, username)
 		if err != nil {
@@ -184,7 +189,28 @@ func (c *client) loginUser() {
 		c.encryptionKey = key
 		// Store the plaintext password temporarily.
 		c.plaintextPassword = password
-		fmt.Println("Login successful. Token and encryption key saved.")
+		fmt.Println("Login successful. Tokens and encryption key saved.")
+	}
+}
+
+// refreshAccessToken requests new tokens using the refresh token.
+func (c *client) refreshAccessToken() {
+	ui.ClearScreen()
+	fmt.Println("** Refresh Access Token **")
+
+	res := c.sendRequest(api.Request{
+		Action:       api.ActionRefresh,
+		Username:     c.currentUser,
+		RefreshToken: c.refreshToken,
+	})
+
+	fmt.Println("Success:", res.Success)
+	fmt.Println("Message:", res.Message)
+
+	if res.Success {
+		c.authToken = res.Token
+		c.refreshToken = res.RefreshToken
+		fmt.Println("Token refreshed successfully.")
 	}
 }
 
@@ -268,21 +294,21 @@ func (c *client) updateData() {
 }
 
 // logoutUser calls the logout action on the server, and if successful,
-// clears the local session (currentUser/authToken/encryptionKey).
+// clears the local session (currentUser, tokens, encryptionKey).
 func (c *client) logoutUser() {
 	ui.ClearScreen()
 	fmt.Println("** Logout **")
 
-	if c.currentUser == "" || c.authToken == "" {
+	if c.currentUser == "" || c.refreshToken == "" {
 		fmt.Println("Not logged in.")
 		return
 	}
 
 	// Send the logout request.
 	res := c.sendRequest(api.Request{
-		Action:   api.ActionLogout,
-		Username: c.currentUser,
-		Token:    c.authToken,
+		Action:       api.ActionLogout,
+		Username:     c.currentUser,
+		RefreshToken: c.refreshToken,
 	})
 
 	fmt.Println("Success:", res.Success)
@@ -292,6 +318,7 @@ func (c *client) logoutUser() {
 	if res.Success {
 		c.currentUser = ""
 		c.authToken = ""
+		c.refreshToken = ""
 		c.encryptionKey = nil
 		c.plaintextPassword = ""
 	}
