@@ -1,31 +1,38 @@
-SDS-PRAC-CHAD (CODIGO)
-    ├── .vscode
-    │   └── launch.json
-    ├── __debug_bin1069313532.exe
-    ├── certs
-    │   ├── server.crt
-    │   └── server.key
-    ├── data
-    │   └── server.db
-    ├── go.mod
-    ├── go.sum
-    ├── keys
-    │   ├── private.pem
-    │   └── public.pem
-    ├── main.go
-    ├── pkg
-    │   ├── api
-    │   │   └── api.go
-    │   ├── client
-    │   │   └── client.go
-    │   ├── server
-    │   │   └── server.go
-    │   ├── store
-    │   │   ├── bbolt.go
-    │   │   └── store.go
-    │   └── ui
-    │       └── ui.go
-    ├── prac.exe
-    ├── public-keys
-    └── resources
-        └── project-tree-structure.txt
+extracted_zip/
+    SDS-PRAC-CHAD (CODIGO)/
+        go.mod
+        go.sum
+        main.go
+        prac.exe
+        __debug_bin1069313532.exe
+        __debug_bin1078281499.exe
+        __debug_bin288417432.exe
+        .vscode/
+            launch.json
+        certs/
+            server.crt
+            server.key
+        data/
+            server.db
+        decryption-tests/
+            decrypt.go
+        keys/
+            private.pem
+            public.pem
+        pkg/
+            api/
+                api.go
+            client/
+                client.go
+            crypto/
+                crypto.go
+            server/
+                server.go
+            store/
+                bbolt.go
+                store.go
+            ui/
+                ui.go
+        public-keys/
+        resources/
+            project-tree-structure.txt
