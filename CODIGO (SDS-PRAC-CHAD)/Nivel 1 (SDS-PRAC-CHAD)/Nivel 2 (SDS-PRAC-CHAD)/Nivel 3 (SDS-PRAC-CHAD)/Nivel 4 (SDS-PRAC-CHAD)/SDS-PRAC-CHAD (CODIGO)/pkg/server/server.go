@@ -1,7 +1,7 @@
 package server
 
 import (
-	"crypto/rsa"
+	"crypto/ecdsa"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -21,11 +21,11 @@ import (
 )
 
 var (
-	privateKey *rsa.PrivateKey
-	publicKey  *rsa.PublicKey
+	privateKey *ecdsa.PrivateKey
+	publicKey  *ecdsa.PublicKey
 )
 
-// init loads the RSA private and public keys from the "keys" folder.
+// init loads the ECDSA private and public keys from the "keys" folder.
 func init() {
 	// Load private key from keys/private.pem
 	privBytes, err := ioutil.ReadFile("keys/private.pem")
@@ -36,8 +36,8 @@ func init() {
 	if block == nil {
 		log.Fatal("Failed to parse PEM block containing the private key")
 	}
-	// First try to parse as PKCS1
-	parsedKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	// Try to parse as EC private key (PKCS1 or PKCS8)
+	parsedKey, err := x509.ParseECPrivateKey(block.Bytes)
 	if err != nil {
 		// If that fails, try PKCS8
 		keyInterface, err2 := x509.ParsePKCS8PrivateKey(block.Bytes)
@@ -45,9 +45,9 @@ func init() {
 			log.Fatalf("Error parsing private key: %v", err2)
 		}
 		var ok bool
-		privateKey, ok = keyInterface.(*rsa.PrivateKey)
+		privateKey, ok = keyInterface.(*ecdsa.PrivateKey)
 		if !ok {
-			log.Fatal("Private key is not of type RSA")
+			log.Fatal("Private key is not of type ECDSA")
 		}
 	} else {
 		privateKey = parsedKey
@@ -62,18 +62,18 @@ func init() {
 	if block == nil {
 		log.Fatal("Failed to parse PEM block containing the public key")
 	}
-	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	pubInterface, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
 		log.Fatalf("Error parsing public key: %v", err)
 	}
 	var ok bool
-	publicKey, ok = pub.(*rsa.PublicKey)
+	publicKey, ok = pubInterface.(*ecdsa.PublicKey)
 	if !ok {
-		log.Fatal("Public key is not of type RSA")
+		log.Fatal("Public key is not of type ECDSA")
 	}
 }
 
-// generateAccessToken creates an access JWT for the given username with short expiration (30 seconds).
+// generateAccessToken creates an access JWT for the given username with short expiration.
 func generateAccessToken(username string) (string, error) {
 	claims := jwt.StandardClaims{
 		Subject:   username,
@@ -81,7 +81,7 @@ func generateAccessToken(username string) (string, error) {
 		IssuedAt:  time.Now().Unix(),
 		Issuer:    "prac-server",
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	tokenString, err := token.SignedString(privateKey)
 	if err != nil {
 		return "", err
@@ -89,7 +89,7 @@ func generateAccessToken(username string) (string, error) {
 	return tokenString, nil
 }
 
-// generateRefreshToken creates a refresh JWT for the given username with longer expiration (7 days).
+// generateRefreshToken creates a refresh JWT for the given username with longer expiration.
 func generateRefreshToken(username string) (string, error) {
 	claims := jwt.StandardClaims{
 		Subject:   username,
@@ -97,7 +97,7 @@ func generateRefreshToken(username string) (string, error) {
 		IssuedAt:  time.Now().Unix(),
 		Issuer:    "prac-server",
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	tokenString, err := token.SignedString(privateKey)
 	if err != nil {
 		return "", err
@@ -230,13 +230,13 @@ func (s *serverImpl) loginUser(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Invalid credentials"}
 	}
 
-	// Generate an access token (30 seconds expiration for debugging).
+	// Generate an access token.
 	accessToken, err := generateAccessToken(req.Username)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error generating access token"}
 	}
 
-	// Generate a refresh token (7 days expiration).
+	// Generate a refresh token.
 	refreshToken, err := generateRefreshToken(req.Username)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error generating refresh token"}
@@ -272,7 +272,7 @@ func (s *serverImpl) refreshToken(req api.Request) api.Response {
 
 	// Optionally, verify the refresh token's expiration.
 	token, err := jwt.Parse(req.RefreshToken, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
+		if _, ok := t.Method.(*jwt.SigningMethodECDSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
 		return publicKey, nil
@@ -374,7 +374,7 @@ func (s *serverImpl) userExists(username string) (bool, error) {
 // isAccessTokenValid verifies the access token's signature and expiration.
 func (s *serverImpl) isAccessTokenValid(username, tokenString string) bool {
 	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
+		if _, ok := t.Method.(*jwt.SigningMethodECDSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
 		return publicKey, nil
