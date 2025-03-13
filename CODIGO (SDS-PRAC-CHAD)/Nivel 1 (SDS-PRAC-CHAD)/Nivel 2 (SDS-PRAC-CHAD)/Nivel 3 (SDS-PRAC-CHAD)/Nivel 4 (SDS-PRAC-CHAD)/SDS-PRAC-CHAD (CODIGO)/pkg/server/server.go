@@ -270,7 +270,6 @@ func (s *serverImpl) refreshToken(req api.Request) api.Response {
 
 	// Optionally, verify the refresh token's expiration.
 	token, err := jwt.Parse(req.RefreshToken, func(t *jwt.Token) (interface{}, error) {
-		// Use the actual type *jwt.SigningMethodEd25519 in the type assertion.
 		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
@@ -359,10 +358,10 @@ func (s *serverImpl) logoutUser(req api.Request) api.Response {
 func (s *serverImpl) userExists(username string) (bool, error) {
 	_, err := s.db.Get("auth", []byte(username))
 	if err != nil {
-		if strings.Contains(err.Error(), "bucket no encontrado: auth") {
+		if strings.Contains(err.Error(), "bucket not found:") {
 			return false, nil
 		}
-		if err.Error() == "clave no encontrada: "+username {
+		if strings.Contains(err.Error(), "key not found:") {
 			return false, nil
 		}
 		return false, err
@@ -373,7 +372,6 @@ func (s *serverImpl) userExists(username string) (bool, error) {
 // isAccessTokenValid verifies the access token's signature and expiration.
 func (s *serverImpl) isAccessTokenValid(username, tokenString string) bool {
 	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-		// Use the actual type *jwt.SigningMethodEd25519 in the type assertion.
 		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
@@ -386,7 +384,6 @@ func (s *serverImpl) isAccessTokenValid(username, tokenString string) bool {
 	if !ok {
 		return false
 	}
-	// Check that subject matches username.
 	if claims["sub"] != username {
 		return false
 	}

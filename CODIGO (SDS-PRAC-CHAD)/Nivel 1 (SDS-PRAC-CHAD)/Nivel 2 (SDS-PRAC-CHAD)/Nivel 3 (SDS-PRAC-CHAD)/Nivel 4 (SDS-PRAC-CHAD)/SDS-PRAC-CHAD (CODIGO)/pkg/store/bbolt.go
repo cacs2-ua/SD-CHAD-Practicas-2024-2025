@@ -2,76 +2,92 @@ package store
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 
 	"go.etcd.io/bbolt"
+	"golang.org/x/crypto/sha3"
 )
 
+// hashBytes returns the SHA3-256 hash of the given data.
+func hashBytes(data []byte) []byte {
+	h := sha3.New256()
+	h.Write(data)
+	return h.Sum(nil)
+}
+
 /*
-	Implementación de la interfaz Store mediante BoltDB (versión bbolt)
+	Implementation of the Store interface using BoltDB (bbolt version)
 */
 
-// BboltStore contiene la instancia de la base de datos bbolt.
+// BboltStore holds the instance of the bbolt database.
 type BboltStore struct {
 	db *bbolt.DB
 }
 
-// NewBboltStore abre la base de datos bbolt en la ruta especificada.
+// NewBboltStore opens the bbolt database at the specified path.
 func NewBboltStore(path string) (*BboltStore, error) {
 	db, err := bbolt.Open(path, 0600, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error al abrir base de datos bbolt: %v", err)
+		return nil, fmt.Errorf("error opening bbolt database: %v", err)
 	}
 	return &BboltStore{db: db}, nil
 }
 
-// Put almacena o actualiza (key, value) dentro de un bucket = namespace.
-// No se soportan sub-buckets.
+// Put stores or updates (key, value) within a bucket (namespace).
+// Sub-buckets are not supported.
 func (s *BboltStore) Put(namespace string, key, value []byte) error {
+	hashedNamespace := hashBytes([]byte(namespace))
+	hashedKey := hashBytes(key)
 	return s.db.Update(func(tx *bbolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(namespace))
+		b, err := tx.CreateBucketIfNotExists(hashedNamespace)
 		if err != nil {
-			return fmt.Errorf("error al crear/abrir bucket '%s': %v", namespace, err)
+			return fmt.Errorf("error creating/opening bucket '%s': %v", hex.EncodeToString(hashedNamespace), err)
 		}
-		return b.Put(key, value)
+		return b.Put(hashedKey, value)
 	})
 }
 
-// Get recupera el valor de (key) en el bucket = namespace.
+// Get retrieves the value for the given key in the bucket (namespace).
 func (s *BboltStore) Get(namespace string, key []byte) ([]byte, error) {
+	hashedNamespace := hashBytes([]byte(namespace))
+	hashedKey := hashBytes(key)
 	var val []byte
 	err := s.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(namespace))
+		b := tx.Bucket(hashedNamespace)
 		if b == nil {
-			return fmt.Errorf("bucket no encontrado: %s", namespace)
+			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(hashedNamespace))
 		}
-		val = b.Get(key)
+		val = b.Get(hashedKey)
 		if val == nil {
-			return fmt.Errorf("clave no encontrada: %s", string(key))
+			return fmt.Errorf("key not found: %s", hex.EncodeToString(hashedKey))
 		}
 		return nil
 	})
 	return val, err
 }
 
-// Delete elimina la clave 'key' del bucket = namespace.
+// Delete removes the key from the bucket (namespace).
 func (s *BboltStore) Delete(namespace string, key []byte) error {
+	hashedNamespace := hashBytes([]byte(namespace))
+	hashedKey := hashBytes(key)
 	return s.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(namespace))
+		b := tx.Bucket(hashedNamespace)
 		if b == nil {
-			return fmt.Errorf("bucket no encontrado: %s", namespace)
+			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(hashedNamespace))
 		}
-		return b.Delete(key)
+		return b.Delete(hashedKey)
 	})
 }
 
-// ListKeys devuelve todas las claves del bucket = namespace.
+// ListKeys returns all keys in the bucket (namespace).
 func (s *BboltStore) ListKeys(namespace string) ([][]byte, error) {
+	hashedNamespace := hashBytes([]byte(namespace))
 	var keys [][]byte
 	err := s.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(namespace))
+		b := tx.Bucket(hashedNamespace)
 		if b == nil {
-			return fmt.Errorf("bucket no encontrado: %s", namespace)
+			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(hashedNamespace))
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
@@ -84,16 +100,19 @@ func (s *BboltStore) ListKeys(namespace string) ([][]byte, error) {
 	return keys, err
 }
 
-// KeysByPrefix devuelve las claves que inicien con 'prefix' en el bucket = namespace.
+// KeysByPrefix returns keys that start with 'prefix' in the bucket (namespace).
+// Note: Because keys are hashed, prefix searches may not be useful.
 func (s *BboltStore) KeysByPrefix(namespace string, prefix []byte) ([][]byte, error) {
+	hashedNamespace := hashBytes([]byte(namespace))
+	hashedPrefix := hashBytes(prefix)
 	var matchedKeys [][]byte
 	err := s.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(namespace))
+		b := tx.Bucket(hashedNamespace)
 		if b == nil {
-			return fmt.Errorf("bucket no encontrado: %s", namespace)
+			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(hashedNamespace))
 		}
 		c := b.Cursor()
-		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+		for k, _ := c.Seek(hashedPrefix); k != nil && bytes.HasPrefix(k, hashedPrefix); k, _ = c.Next() {
 			kCopy := make([]byte, len(k))
 			copy(kCopy, k)
 			matchedKeys = append(matchedKeys, kCopy)
@@ -103,24 +122,24 @@ func (s *BboltStore) KeysByPrefix(namespace string, prefix []byte) ([][]byte, er
 	return matchedKeys, err
 }
 
-// Close cierra la base de datos bbolt.
+// Close closes the bbolt database.
 func (s *BboltStore) Close() error {
 	return s.db.Close()
 }
 
-// Dump imprime todo el contenido de la base de datos bbolt para propósitos de depuración.
+// Dump prints the entire contents of the bbolt database for debugging purposes.
 func (s *BboltStore) Dump() error {
 	err := s.db.View(func(tx *bbolt.Tx) error {
 		return tx.ForEach(func(bucketName []byte, b *bbolt.Bucket) error {
-			fmt.Printf("Bucket: %s\n", string(bucketName))
+			fmt.Printf("Bucket: %s\n", hex.EncodeToString(bucketName))
 			return b.ForEach(func(k, v []byte) error {
-				fmt.Printf("  Key: %s, Value: %s\n", string(k), string(v))
+				fmt.Printf("  Key: %s, Value: %s\n", hex.EncodeToString(k), string(v))
 				return nil
 			})
 		})
 	})
 	if err != nil {
-		return fmt.Errorf("error al hacer el volcado de depuración: %v", err)
+		return fmt.Errorf("error dumping database: %v", err)
 	}
 	return nil
 }
