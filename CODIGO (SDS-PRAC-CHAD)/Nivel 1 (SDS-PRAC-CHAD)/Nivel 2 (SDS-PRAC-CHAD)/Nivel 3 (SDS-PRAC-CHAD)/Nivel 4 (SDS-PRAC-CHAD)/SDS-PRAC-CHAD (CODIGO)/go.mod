@@ -12,4 +12,5 @@ require (
 	github.com/nsf/termbox-go v1.1.1 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/term v0.30.0 // indirect
 )

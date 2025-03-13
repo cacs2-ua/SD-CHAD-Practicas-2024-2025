@@ -176,6 +176,9 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if req.Username == "" || req.Password == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
+	if len(req.Password) < 8 {
+		return api.Response{Success: false, Message: "Password must have at least 8 characters"}
+	}
 
 	// Check if the user already exists in 'auth'.
 	exists, err := s.userExists(req.Username)
@@ -209,6 +212,9 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 func (s *serverImpl) loginUser(req api.Request) api.Response {
 	if req.Username == "" || req.Password == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
+	}
+	if len(req.Password) < 8 {
+		return api.Response{Success: false, Message: "Password must have at least 8 characters"}
 	}
 
 	// Retrieve the stored hashed password from 'auth'.

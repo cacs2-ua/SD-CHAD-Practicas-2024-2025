@@ -1,5 +1,3 @@
-// El paquete ui proporciona un conjunto de funciones sencillas
-// para la interacción con el usuario mediante terminal
 package ui
 
 import (
@@ -7,15 +5,17 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"golang.org/x/term"
 )
 
-// PrintMenu muestra un menú y solicita al usuario que seleccione una opción.
+// PrintMenu prints a menu and asks the user to select an option.
 func PrintMenu(title string, options []string) int {
 	fmt.Print(title, "\n\n")
 	for i, option := range options {
 		fmt.Printf("%d. %s\n", i+1, option)
 	}
-	fmt.Print("\nSelecciona una opción: ")
+	fmt.Print("\nSelect an option: ")
 
 	var choice int
 	for {
@@ -23,13 +23,13 @@ func PrintMenu(title string, options []string) int {
 		if err == nil && choice >= 1 && choice <= len(options) {
 			break
 		}
-		fmt.Println("Opción no válida, inténtalo de nuevo.")
-		fmt.Print("Selecciona una opción: ")
+		fmt.Println("Invalid option, please try again.")
+		fmt.Print("Select an option: ")
 	}
 	return choice
 }
 
-// ReadInput solicita un texto al usuario y lo devuelve como string.
+// ReadInput asks the user for input and returns it as a string.
 func ReadInput(prompt string) string {
 	fmt.Print(prompt + ": ")
 	scanner := bufio.NewScanner(os.Stdin)
@@ -37,34 +37,73 @@ func ReadInput(prompt string) string {
 	return strings.TrimSpace(scanner.Text())
 }
 
-// Confirm solicita una confirmación Sí/No al usuario.
+// ReadPassword asks the user for password input and masks the input with asterisks.
+func ReadPassword(prompt string) string {
+	fmt.Print(prompt + ": ")
+	// Set terminal to raw mode.
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		fmt.Println("Error setting terminal to raw mode:", err)
+		return ""
+	}
+	defer term.Restore(int(os.Stdin.Fd()), oldState)
+
+	var password []rune
+	buf := make([]byte, 1)
+	for {
+		n, err := os.Stdin.Read(buf)
+		if err != nil || n == 0 {
+			break
+		}
+		// Break on newline or carriage return.
+		if buf[0] == '\r' || buf[0] == '\n' {
+			break
+		}
+		// Handle backspace (8 or 127).
+		if buf[0] == 8 || buf[0] == 127 {
+			if len(password) > 0 {
+				password = password[:len(password)-1]
+				// Move cursor back, print space, move cursor back again.
+				fmt.Print("\b \b")
+			}
+			continue
+		}
+		// Append character and print asterisk.
+		password = append(password, rune(buf[0]))
+		fmt.Print("*")
+	}
+	fmt.Println()
+	return string(password)
+}
+
+// Confirm asks the user for a yes/no confirmation.
 func Confirm(message string) bool {
 	for {
-		fmt.Print(message + " (S/N): ")
+		fmt.Print(message + " (Y/N): ")
 		var response string
 		fmt.Scanln(&response)
 		response = strings.ToUpper(strings.TrimSpace(response))
-		if response == "S" {
+		if response == "Y" {
 			return true
 		} else if response == "N" {
 			return false
 		}
-		fmt.Println("Respuesta no válida, introduce S o N.")
+		fmt.Println("Invalid response, please enter Y or N.")
 	}
 }
 
-// ClearScreen limpia la pantalla de la terminal.
+// ClearScreen clears the terminal screen.
 func ClearScreen() {
 	fmt.Print("\033[H\033[2J")
 }
 
-// Pause muestra un mensaje y espera a que el usuario presione Enter.
+// Pause shows a message and waits for the user to press Enter.
 func Pause(prompt string) {
 	fmt.Println(prompt)
 	bufio.NewScanner(os.Stdin).Scan()
 }
 
-// ReadInt solicita al usuario un entero y valida la entrada.
+// ReadInt asks the user for an integer and validates the input.
 func ReadInt(prompt string) int {
 	for {
 		fmt.Print(prompt + ": ")
@@ -73,12 +112,12 @@ func ReadInt(prompt string) int {
 		if err == nil {
 			return value
 		}
-		fmt.Println("Valor no válido, introduce un número entero.")
+		fmt.Println("Invalid value, please enter an integer.")
 		bufio.NewScanner(os.Stdin).Scan()
 	}
 }
 
-// ReadFloat solicita al usuario un número real y valida la entrada.
+// ReadFloat asks the user for a float and validates the input.
 func ReadFloat(prompt string) float64 {
 	for {
 		fmt.Print(prompt + ": ")
@@ -87,14 +126,14 @@ func ReadFloat(prompt string) float64 {
 		if err == nil {
 			return value
 		}
-		fmt.Println("Valor no válido, introduce un número real.")
+		fmt.Println("Invalid value, please enter a number.")
 		bufio.NewScanner(os.Stdin).Scan()
 	}
 }
 
-// ReadMultiline lee varias líneas hasta que el usuario introduzca línea vacía.
+// ReadMultiline reads multiple lines until the user enters an empty line.
 func ReadMultiline(prompt string) string {
-	fmt.Println(prompt + " (deja una línea en blanco para terminar):")
+	fmt.Println(prompt + " (enter an empty line to finish):")
 	scanner := bufio.NewScanner(os.Stdin)
 	var lines []string
 	for {
@@ -108,7 +147,7 @@ func ReadMultiline(prompt string) string {
 	return strings.Join(lines, "\n")
 }
 
-// PrintProgressBar muestra una barra de progreso en la terminal.
+// PrintProgressBar displays a progress bar in the terminal.
 func PrintProgressBar(progress, total int, width int) {
 	percent := float64(progress) / float64(total) * 100.0
 	filled := int(float64(width) * (float64(progress) / float64(total)))

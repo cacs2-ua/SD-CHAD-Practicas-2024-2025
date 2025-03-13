@@ -156,7 +156,21 @@ func (c *client) registerUser() {
 	fmt.Println("** User Registration **")
 
 	username := ui.ReadInput("Username")
-	password := ui.ReadInput("Password")
+	password := ui.ReadPassword("Password")
+
+	// Client-side validation
+	if username == "" {
+		fmt.Println("Username cannot be empty")
+		return
+	}
+	if password == "" {
+		fmt.Println("Password cannot be empty")
+		return
+	}
+	if len(password) < 8 {
+		fmt.Println("Password must have at least 8 characters")
+		return
+	}
 
 	// Send the registration request to the server.
 	res := c.sendRequest(api.Request{
@@ -211,7 +225,21 @@ func (c *client) loginUser() {
 	fmt.Println("** Login **")
 
 	username := ui.ReadInput("Username")
-	password := ui.ReadInput("Password")
+	password := ui.ReadPassword("Password")
+
+	// Client-side validation
+	if username == "" {
+		fmt.Println("Username cannot be empty")
+		return
+	}
+	if password == "" {
+		fmt.Println("Password cannot be empty")
+		return
+	}
+	if len(password) < 8 {
+		fmt.Println("Password must have at least 8 characters")
+		return
+	}
 
 	res := c.sendRequest(api.Request{
 		Action:   api.ActionLogin,
