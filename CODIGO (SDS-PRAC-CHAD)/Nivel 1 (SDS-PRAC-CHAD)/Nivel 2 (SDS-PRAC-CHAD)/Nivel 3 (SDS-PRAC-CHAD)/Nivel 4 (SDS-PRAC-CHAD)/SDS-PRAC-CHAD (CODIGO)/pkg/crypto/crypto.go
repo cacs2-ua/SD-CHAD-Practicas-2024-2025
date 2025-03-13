@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"io"
 
-	"golang.org/x/crypto/scrypt"
+	"golang.org/x/crypto/argon2"
 )
 
-// DeriveKey uses scrypt to derive a symmetric key from the provided password and salt.
-// Here, we use the username as the salt.
-func DeriveKey(password, salt string) ([]byte, error) {
-	// The parameters N, r and p are chosen for a good tradeoff between security and performance.
-	return scrypt.Key([]byte(password), []byte(salt), 32768, 8, 1, 32)
+// DeriveKey uses Argon2id to derive a symmetric key from the provided password, salt and context.
+// The salt is combined with the context and then used in the key derivation.
+func DeriveKey(password, salt, context string) ([]byte, error) {
+	combinedSalt := []byte(salt + ":" + context)
+	// Argon2id parameters:
+	// time = 1, memory = 64*1024, parallelism = 4, key length = 32 bytes
+	key := argon2.IDKey([]byte(password), combinedSalt, 1, 64*1024, 4, 32)
+	return key, nil
 }
 
 // Encrypt encrypts the plaintext using AES-GCM with the provided key.
