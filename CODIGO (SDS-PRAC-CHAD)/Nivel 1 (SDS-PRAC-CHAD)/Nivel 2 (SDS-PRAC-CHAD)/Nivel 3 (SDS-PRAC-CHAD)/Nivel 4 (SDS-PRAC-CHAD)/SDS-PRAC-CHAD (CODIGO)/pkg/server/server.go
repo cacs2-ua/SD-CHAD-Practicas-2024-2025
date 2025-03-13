@@ -38,6 +38,7 @@ var (
 	publicKey  ed25519.PublicKey
 )
 
+// init loads the Ed25519 private and public keys from the "keys" folder.
 func init() {
 	// Load private key from keys/private.pem
 	privBytes, err := ioutil.ReadFile("keys/private.pem")
@@ -75,6 +76,25 @@ func init() {
 	if !ok {
 		log.Fatal("Public key is not of type Ed25519")
 	}
+}
+
+// validateJWTSignature parses the token string and validates its signature using the public key.
+// It returns the parsed token if valid, or an error otherwise.
+func validateJWTSignature(tokenStr string) (*jwt.Token, error) {
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		// Check that the token is signed with the expected method.
+		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return publicKey, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !token.Valid {
+		return nil, fmt.Errorf("token is not valid")
+	}
+	return token, nil
 }
 
 // generateAccessToken creates an access JWT for the given user UUID with short expiration.
@@ -280,14 +300,9 @@ func (s *serverImpl) refreshToken(req api.Request) api.Response {
 	if hex.EncodeToString(storedHash) != hex.EncodeToString(incomingHash) {
 		return api.Response{Success: false, Message: "Invalid refresh token"}
 	}
-	// Verify token expiration and signature.
-	token, err := jwt.Parse(req.RefreshToken, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
-		}
-		return publicKey, nil
-	})
-	if err != nil || !token.Valid {
+	// Validate the refresh token signature using the new function.
+	_, err = validateJWTSignature(req.RefreshToken)
+	if err != nil {
 		return api.Response{Success: false, Message: "Expired or invalid refresh token"}
 	}
 	// Generate new tokens.
@@ -384,15 +399,10 @@ func (s *serverImpl) userExists(username string) (bool, error) {
 	return true, nil
 }
 
-// isAccessTokenValid verifies the token signature and expiration.
+// isAccessTokenValid verifies the token signature and expiration using the user UUID.
 func (s *serverImpl) isAccessTokenValid(userUUID, tokenString string) bool {
-	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
-		}
-		return publicKey, nil
-	})
-	if err != nil || !token.Valid {
+	token, err := validateJWTSignature(tokenString)
+	if err != nil {
 		return false
 	}
 	claims, ok := token.Claims.(jwt.MapClaims)
