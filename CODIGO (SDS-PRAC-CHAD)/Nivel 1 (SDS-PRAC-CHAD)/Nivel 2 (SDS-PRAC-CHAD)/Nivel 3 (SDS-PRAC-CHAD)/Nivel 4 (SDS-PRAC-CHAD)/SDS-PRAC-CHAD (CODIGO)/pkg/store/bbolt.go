@@ -9,11 +9,25 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-// hashBytes returns the SHA3-256 hash of the given data.
-func hashBytes(data []byte) []byte {
+// HashBytes returns the SHA3-256 hash of the given data.
+func HashBytes(data []byte) []byte {
 	h := sha3.New256()
 	h.Write(data)
 	return h.Sum(nil)
+}
+
+// shouldHash returns true if the given namespace should have its key hashed.
+// For the "usernames" bucket, we do not hash the key.
+func shouldHash(namespace string) bool {
+	return namespace != "usernames"
+}
+
+// getKey returns the key to be used in the bucket. If shouldHash is true, the key is hashed.
+func getKey(namespace string, key []byte) []byte {
+	if shouldHash(namespace) {
+		return HashBytes(key)
+	}
+	return key
 }
 
 /*
@@ -22,7 +36,7 @@ func hashBytes(data []byte) []byte {
 
 // BboltStore holds the instance of the bbolt database.
 type BboltStore struct {
-	db *bbolt.DB
+	DB *bbolt.DB
 }
 
 // NewBboltStore opens the bbolt database at the specified path.
@@ -31,36 +45,36 @@ func NewBboltStore(path string) (*BboltStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error opening bbolt database: %v", err)
 	}
-	return &BboltStore{db: db}, nil
+	return &BboltStore{DB: db}, nil
 }
 
 // Put stores or updates (key, value) within a bucket (namespace).
 // Sub-buckets are not supported.
 func (s *BboltStore) Put(namespace string, key, value []byte) error {
-	hashedNamespace := hashBytes([]byte(namespace))
-	hashedKey := hashBytes(key)
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	actualKey := getKey(namespace, key)
+	hashedNamespace := HashBytes([]byte(namespace))
+	return s.DB.Update(func(tx *bbolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(hashedNamespace)
 		if err != nil {
 			return fmt.Errorf("error creating/opening bucket '%s': %v", hex.EncodeToString(hashedNamespace), err)
 		}
-		return b.Put(hashedKey, value)
+		return b.Put(actualKey, value)
 	})
 }
 
 // Get retrieves the value for the given key in the bucket (namespace).
 func (s *BboltStore) Get(namespace string, key []byte) ([]byte, error) {
-	hashedNamespace := hashBytes([]byte(namespace))
-	hashedKey := hashBytes(key)
+	actualKey := getKey(namespace, key)
+	hashedNamespace := HashBytes([]byte(namespace))
 	var val []byte
-	err := s.db.View(func(tx *bbolt.Tx) error {
+	err := s.DB.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(hashedNamespace)
 		if b == nil {
 			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(hashedNamespace))
 		}
-		val = b.Get(hashedKey)
+		val = b.Get(actualKey)
 		if val == nil {
-			return fmt.Errorf("key not found: %s", hex.EncodeToString(hashedKey))
+			return fmt.Errorf("key not found: %s", hex.EncodeToString(actualKey))
 		}
 		return nil
 	})
@@ -69,22 +83,22 @@ func (s *BboltStore) Get(namespace string, key []byte) ([]byte, error) {
 
 // Delete removes the key from the bucket (namespace).
 func (s *BboltStore) Delete(namespace string, key []byte) error {
-	hashedNamespace := hashBytes([]byte(namespace))
-	hashedKey := hashBytes(key)
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	actualKey := getKey(namespace, key)
+	hashedNamespace := HashBytes([]byte(namespace))
+	return s.DB.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(hashedNamespace)
 		if b == nil {
 			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(hashedNamespace))
 		}
-		return b.Delete(hashedKey)
+		return b.Delete(actualKey)
 	})
 }
 
 // ListKeys returns all keys in the bucket (namespace).
 func (s *BboltStore) ListKeys(namespace string) ([][]byte, error) {
-	hashedNamespace := hashBytes([]byte(namespace))
+	hashedNamespace := HashBytes([]byte(namespace))
 	var keys [][]byte
-	err := s.db.View(func(tx *bbolt.Tx) error {
+	err := s.DB.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(hashedNamespace)
 		if b == nil {
 			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(hashedNamespace))
@@ -103,16 +117,21 @@ func (s *BboltStore) ListKeys(namespace string) ([][]byte, error) {
 // KeysByPrefix returns keys that start with 'prefix' in the bucket (namespace).
 // Note: Because keys are hashed, prefix searches may not be useful.
 func (s *BboltStore) KeysByPrefix(namespace string, prefix []byte) ([][]byte, error) {
-	hashedNamespace := hashBytes([]byte(namespace))
-	hashedPrefix := hashBytes(prefix)
+	hashedNamespace := HashBytes([]byte(namespace))
+	var actualPrefix []byte
+	if shouldHash(namespace) {
+		actualPrefix = HashBytes(prefix)
+	} else {
+		actualPrefix = prefix
+	}
 	var matchedKeys [][]byte
-	err := s.db.View(func(tx *bbolt.Tx) error {
+	err := s.DB.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(hashedNamespace)
 		if b == nil {
 			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(hashedNamespace))
 		}
 		c := b.Cursor()
-		for k, _ := c.Seek(hashedPrefix); k != nil && bytes.HasPrefix(k, hashedPrefix); k, _ = c.Next() {
+		for k, _ := c.Seek(actualPrefix); k != nil && bytes.HasPrefix(k, actualPrefix); k, _ = c.Next() {
 			kCopy := make([]byte, len(k))
 			copy(kCopy, k)
 			matchedKeys = append(matchedKeys, kCopy)
@@ -124,12 +143,12 @@ func (s *BboltStore) KeysByPrefix(namespace string, prefix []byte) ([][]byte, er
 
 // Close closes the bbolt database.
 func (s *BboltStore) Close() error {
-	return s.db.Close()
+	return s.DB.Close()
 }
 
 // Dump prints the entire contents of the bbolt database for debugging purposes.
 func (s *BboltStore) Dump() error {
-	err := s.db.View(func(tx *bbolt.Tx) error {
+	err := s.DB.View(func(tx *bbolt.Tx) error {
 		return tx.ForEach(func(bucketName []byte, b *bbolt.Bucket) error {
 			fmt.Printf("Bucket: %s\n", hex.EncodeToString(bucketName))
 			return b.ForEach(func(k, v []byte) error {

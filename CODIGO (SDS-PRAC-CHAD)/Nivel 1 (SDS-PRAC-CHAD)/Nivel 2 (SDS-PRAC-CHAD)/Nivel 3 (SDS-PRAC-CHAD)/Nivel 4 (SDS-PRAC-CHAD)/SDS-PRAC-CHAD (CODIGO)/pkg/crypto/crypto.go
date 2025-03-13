@@ -4,7 +4,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"io"
 
@@ -12,13 +11,17 @@ import (
 )
 
 // DeriveKey uses Argon2id to derive a symmetric key from the provided password, salt and context.
+// The salt is combined with the context and then used in the key derivation.
 func DeriveKey(password, salt, context string) ([]byte, error) {
 	combinedSalt := []byte(salt + ":" + context)
+	// Argon2id parameters:
+	// time = 1, memory = 64*1024, parallelism = 4, key length = 32 bytes
 	key := argon2.IDKey([]byte(password), combinedSalt, 1, 64*1024, 4, 32)
 	return key, nil
 }
 
 // Encrypt encrypts the plaintext using AES-GCM with the provided key.
+// It returns the nonce concatenated with the ciphertext.
 func Encrypt(plaintext, key []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -33,10 +36,12 @@ func Encrypt(plaintext, key []byte) ([]byte, error) {
 		return nil, err
 	}
 	ciphertext := aesGCM.Seal(nil, nonce, plaintext, nil)
+	// Prepend nonce to ciphertext
 	return append(nonce, ciphertext...), nil
 }
 
 // Decrypt decrypts the data using AES-GCM with the provided key.
+// It expects the input to be nonce concatenated with ciphertext.
 func Decrypt(data, key []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -53,27 +58,3 @@ func Decrypt(data, key []byte) ([]byte, error) {
 	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
 	return aesGCM.Open(nil, nonce, ciphertext, nil)
 }
-
-// uuidKey is the server symmetric key for UUID encryption (32 bytes exactly).
-var uuidKey = []byte("thisis32bytekeyforuuidencrypt!!")
-
-// EncryptUUID encrypts the uuid string using AES-GCM with uuidKey and returns a base64 encoded string.
-func EncryptUUID(uuidStr string) (string, error) {
-	encrypted, err := Encrypt([]byte(uuidStr), uuidKey)
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(encrypted), nil
-}
-
-// DecryptUUID decrypts a base64 encoded string using AES-GCM with uuidKey.
-func DecryptUUID(ciphertext string) (string, error) {
-	data, err := base64.StdEncoding.DecodeString(ciphertext)
-	if err != nil {
-		return "", err
-	}
-	decrypted, err := Decrypt(data, uuidKey)
-	if err != nil {
-		return "", err
-	}
-	return string(decrypted), nil
