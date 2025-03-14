@@ -1,0 +1,25 @@
+# Ignorar ejecutables de Go
+*.exe
+*.out
+*.o
+*.a
+
+# Ignorar archivos de depuración de Go
+__debug_bin*
+
+# Ignorar módulos de Go descargados
+/bin/
+/pkg/mod/
+/vendor/
+
+# Ignorar configuración del editor
+.idea/
+*.swp
+*.swo
+
+# Ignorar archivos de base de datos
+data/server.db
+
+# Ignorar archivos de entorno y logs
+.env
+*.log
