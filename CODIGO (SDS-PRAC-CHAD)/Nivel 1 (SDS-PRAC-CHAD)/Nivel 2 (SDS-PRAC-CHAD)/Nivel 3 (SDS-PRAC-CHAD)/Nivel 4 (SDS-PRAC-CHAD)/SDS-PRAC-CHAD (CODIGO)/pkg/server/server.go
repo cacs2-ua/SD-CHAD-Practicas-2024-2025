@@ -246,9 +246,9 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if !isValidEmail(req.Email) {
 		return api.Response{Success: false, Message: "Invalid email format"}
 	}
-	// Check if user already exists by username.
+	// Check if the username is already taken.
 	if exists, _ := s.userExists(req.Username); exists {
-		return api.Response{Success: false, Message: "User already exists"}
+		return api.Response{Success: false, Message: "That username is already taken"}
 	}
 	// Check if email already exists.
 	_, err := s.db.Get(string(bucketAuthEmail), store.HashBytes([]byte(req.Email)))
@@ -321,13 +321,13 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 	// Lookup username from email.
 	username, err := s.lookupUsernameFromEmail(req.Email)
 	if err != nil {
-		return api.Response{Success: false, Message: "User not found"}, "", ""
+		return api.Response{Success: false, Message: "Invalid credentials"}, "", ""
 	}
 	// Retrieve hashed password from auth_password using username.
 	keyUsername := store.HashBytes([]byte(username))
 	hashedPassVal, err := s.db.Get(string(bucketAuthPassword), keyUsername)
 	if err != nil {
-		return api.Response{Success: false, Message: "User not found"}, "", ""
+		return api.Response{Success: false, Message: "Invalid credentials"}, "", ""
 	}
 	incomingHashed := hashPasswordSHA3(req.Password)
 	if string(hashedPassVal) != incomingHashed {
