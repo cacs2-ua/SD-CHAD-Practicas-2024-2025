@@ -175,7 +175,7 @@ func (c *client) registerUser() {
 	}
 
 	// Send the registration request to the server.
-	res := c.sendRequest(api.Request{
+	res, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionRegister,
 		Username: username,
 		Password: password,
@@ -189,15 +189,24 @@ func (c *client) registerUser() {
 	if res.Success {
 		c.log.Println("Registration successful; attempting automatic login...")
 
-		loginRes := c.sendRequest(api.Request{
+		resLogin, accessToken, refreshToken := c.sendRequest(api.Request{
 			Action:   api.ActionLogin,
 			Username: username,
 			Password: password,
 		})
-		if loginRes.Success {
+		fmt.Println("Success:", resLogin.Success)
+		fmt.Println("Message:", resLogin.Message)
+		if resLogin.Success {
 			c.currentUser = username
-			c.authToken = loginRes.Token
-			c.refreshToken = loginRes.RefreshToken
+			// Remove "Bearer " prefix if present.
+			if strings.HasPrefix(accessToken, "Bearer ") {
+				accessToken = accessToken[7:]
+			}
+			if strings.HasPrefix(refreshToken, "Bearer ") {
+				refreshToken = refreshToken[7:]
+			}
+			c.authToken = accessToken
+			c.refreshToken = refreshToken
 			// Derive the encryption key using the password and username.
 			key, err := crypto.DeriveKey(password, username, "SDS-LECHUGA-BONIATO")
 			if err != nil {
@@ -216,7 +225,7 @@ func (c *client) registerUser() {
 			c.plaintextPassword = password
 			fmt.Println("Automatic login successful. Tokens and encryption key saved.")
 		} else {
-			fmt.Println("Automatic login failed:", loginRes.Message)
+			fmt.Println("Automatic login failed:", resLogin.Message)
 		}
 	}
 }
@@ -245,7 +254,7 @@ func (c *client) loginUser() {
 		return
 	}
 
-	res := c.sendRequest(api.Request{
+	res, accessToken, refreshToken := c.sendRequest(api.Request{
 		Action:   api.ActionLogin,
 		Username: username,
 		Password: password,
@@ -257,8 +266,14 @@ func (c *client) loginUser() {
 	// If login is successful, save currentUser and the tokens.
 	if res.Success {
 		c.currentUser = username
-		c.authToken = res.Token
-		c.refreshToken = res.RefreshToken
+		if strings.HasPrefix(accessToken, "Bearer ") {
+			accessToken = accessToken[7:]
+		}
+		if strings.HasPrefix(refreshToken, "Bearer ") {
+			refreshToken = refreshToken[7:]
+		}
+		c.authToken = accessToken
+		c.refreshToken = refreshToken
 		// Derive the encryption key using the password and username.
 		key, err := crypto.DeriveKey(password, username, "SDS-LECHUGA-BONIATO")
 		if err != nil {
@@ -285,18 +300,22 @@ func (c *client) refreshAccessToken() {
 	if c.currentUser == "" || c.refreshToken == "" {
 		return
 	}
-	res := c.sendRequest(api.Request{
-		Action:       api.ActionRefresh,
-		Username:     c.currentUser,
-		RefreshToken: c.refreshToken,
+	res, accessToken, refreshToken := c.sendRequest(api.Request{
+		Action:   api.ActionRefresh,
+		Username: c.currentUser,
 	})
-
 	fmt.Println("Auto refresh - Success:", res.Success)
 	fmt.Println("Auto refresh - Message:", res.Message)
 
 	if res.Success {
-		c.authToken = res.Token
-		c.refreshToken = res.RefreshToken
+		if strings.HasPrefix(accessToken, "Bearer ") {
+			accessToken = accessToken[7:]
+		}
+		if strings.HasPrefix(refreshToken, "Bearer ") {
+			refreshToken = refreshToken[7:]
+		}
+		c.authToken = accessToken
+		c.refreshToken = refreshToken
 		// Update the access token expiry.
 		expiry, err := parseTokenExpiry(c.authToken)
 		if err != nil {
@@ -320,8 +339,7 @@ func (c *client) fetchData() {
 		return
 	}
 
-	// Send the fetch data request.
-	res := c.sendRequest(api.Request{
+	res, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionFetchData,
 		Username: c.currentUser,
 	})
@@ -374,8 +392,7 @@ func (c *client) updateData() {
 	// Encode the encrypted data to base64 for safe JSON transmission.
 	encodedData := base64.StdEncoding.EncodeToString(encryptedData)
 
-	// Send the update request.
-	res := c.sendRequest(api.Request{
+	res, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionUpdateData,
 		Username: c.currentUser,
 		Data:     encodedData,
@@ -396,8 +413,7 @@ func (c *client) logoutUser() {
 		return
 	}
 
-	// Send the logout request.
-	res := c.sendRequest(api.Request{
+	res, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionLogout,
 		Username: c.currentUser,
 	})
@@ -416,18 +432,17 @@ func (c *client) logoutUser() {
 	}
 }
 
-// sendRequest sends a JSON POST to the server URL and returns the decoded response.
+// sendRequest sends a JSON POST to the server URL and returns the decoded response,
+// along with the access and refresh tokens extracted from the response headers.
 // It is used for all actions.
-func (c *client) sendRequest(req api.Request) api.Response {
+func (c *client) sendRequest(req api.Request) (api.Response, string, string) {
 	jsonData, _ := json.Marshal(req)
-	// Create a new HTTP request.
 	request, err := http.NewRequest("POST", "https://localhost:8080/api", bytes.NewBuffer(jsonData))
 	if err != nil {
 		fmt.Println("Error creating request:", err)
-		return api.Response{Success: false, Message: "Request error"}
+		return api.Response{Success: false, Message: "Request error"}, "", ""
 	}
 	request.Header.Set("Content-Type", "application/json")
-	// Set Authorization header based on the action.
 	switch req.Action {
 	case api.ActionFetchData, api.ActionUpdateData:
 		if c.authToken != "" {
@@ -435,19 +450,22 @@ func (c *client) sendRequest(req api.Request) api.Response {
 		}
 	case api.ActionRefresh, api.ActionLogout:
 		if c.refreshToken != "" {
-			request.Header.Set("Authorization", "Bearer "+c.refreshToken)
+			request.Header.Set("X-Refresh-Token", "Bearer "+c.refreshToken)
 		}
 	}
-	client := &http.Client{}
-	resp, err := client.Do(request)
+	clientHttp := &http.Client{}
+	resp, err := clientHttp.Do(request)
 	if err != nil {
 		fmt.Println("Error contacting server:", err)
-		return api.Response{Success: false, Message: "Connection error"}
+		return api.Response{Success: false, Message: "Connection error"}, "", ""
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	var res api.Response
 	_ = json.Unmarshal(body, &res)
-	return res
+
+	accessToken := resp.Header.Get("Authorization")
+	refreshToken := resp.Header.Get("X-Refresh-Token")
+	return res, accessToken, refreshToken
 }

@@ -159,7 +159,7 @@ func Run() error {
 	return err
 }
 
-// apiHandler decodes the JSON request, extracts the JWT from the Authorization header (if present),
+// apiHandler decodes the JSON request, extracts the JWT tokens from the proper headers,
 // dispatches the request and returns the JSON response.
 func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -172,38 +172,54 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract token from Authorization header if present.
+	// Extract access token from "Authorization" header.
 	authHeader := r.Header.Get("Authorization")
+	var providedAccessToken string
 	if authHeader != "" {
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) == 2 && parts[0] == "Bearer" {
-			tokenValue := parts[1]
-			// For refresh and logout actions, assign tokenValue to RefreshToken.
-			if req.Action == api.ActionRefresh || req.Action == api.ActionLogout {
-				req.RefreshToken = tokenValue
-			} else {
-				req.Token = tokenValue
-			}
+			providedAccessToken = parts[1]
+		}
+	}
+
+	// Extract refresh token from "X-Refresh-Token" header.
+	refreshHeader := r.Header.Get("X-Refresh-Token")
+	var providedRefreshToken string
+	if refreshHeader != "" {
+		parts := strings.SplitN(refreshHeader, " ", 2)
+		if len(parts) == 2 && parts[0] == "Bearer" {
+			providedRefreshToken = parts[1]
 		}
 	}
 
 	var res api.Response
+	var newAccessToken, newRefreshToken string
+
 	switch req.Action {
 	case api.ActionRegister:
 		res = s.registerUser(req)
 	case api.ActionLogin:
-		res = s.loginUser(req)
+		res, newAccessToken, newRefreshToken = s.loginUser(req)
 	case api.ActionRefresh:
-		res = s.refreshToken(req)
+		res, newAccessToken, newRefreshToken = s.refreshToken(req, providedRefreshToken)
 	case api.ActionFetchData:
-		res = s.fetchData(req)
+		res = s.fetchData(req, providedAccessToken)
 	case api.ActionUpdateData:
-		res = s.updateData(req)
+		res = s.updateData(req, providedAccessToken)
 	case api.ActionLogout:
-		res = s.logoutUser(req)
+		res = s.logoutUser(req, providedRefreshToken)
 	default:
 		res = api.Response{Success: false, Message: "Unknown action"}
 	}
+
+	// Set tokens in headers for actions that generate tokens.
+	if newAccessToken != "" {
+		w.Header().Set("Authorization", "Bearer "+newAccessToken)
+	}
+	if newRefreshToken != "" {
+		w.Header().Set("X-Refresh-Token", "Bearer "+newRefreshToken)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(res)
 }
@@ -251,115 +267,105 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 
 // loginUser verifies the hashed password in auth_password, retrieves the encrypted UUID from auth_uuid,
 // decrypts it, then generates tokens. The refresh token is stored hashed.
-func (s *serverImpl) loginUser(req api.Request) api.Response {
+func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 	if req.Username == "" || req.Password == "" {
-		return api.Response{Success: false, Message: "Missing credentials"}
+		return api.Response{Success: false, Message: "Missing credentials"}, "", ""
 	}
 	if len(req.Username) < 8 {
-		return api.Response{Success: false, Message: "Username must have at least 8 characters"}
+		return api.Response{Success: false, Message: "Username must have at least 8 characters"}, "", ""
 	}
 	if len(req.Password) < 8 {
-		return api.Response{Success: false, Message: "Password must have at least 8 characters"}
+		return api.Response{Success: false, Message: "Password must have at least 8 characters"}, "", ""
 	}
 	keyUsername := store.HashBytes([]byte(req.Username))
 	hashedPassVal, err := s.db.Get(string(bucketAuthPassword), keyUsername)
 	if err != nil {
-		return api.Response{Success: false, Message: "User not found"}
+		return api.Response{Success: false, Message: "User not found"}, "", ""
 	}
 	incomingHashed := hashPasswordSHA3(req.Password)
 	if string(hashedPassVal) != incomingHashed {
-		return api.Response{Success: false, Message: "Invalid credentials"}
+		return api.Response{Success: false, Message: "Invalid credentials"}, "", ""
 	}
 	encryptedUUID, err := s.db.Get(string(bucketAuthUUID), keyUsername)
 	if err != nil {
-		return api.Response{Success: false, Message: "Error retrieving UUID"}
+		return api.Response{Success: false, Message: "Error retrieving UUID"}, "", ""
 	}
 	decryptedUUID, err := crypto.DecryptUUID(string(encryptedUUID))
 	if err != nil {
-		return api.Response{Success: false, Message: "Error decrypting UUID"}
+		return api.Response{Success: false, Message: "Error decrypting UUID"}, "", ""
 	}
 	accessToken, err := generateAccessToken(decryptedUUID)
 	if err != nil {
-		return api.Response{Success: false, Message: "Error generating access token"}
+		return api.Response{Success: false, Message: "Error generating access token"}, "", ""
 	}
 	refreshToken, err := generateRefreshToken(decryptedUUID)
 	if err != nil {
-		return api.Response{Success: false, Message: "Error generating refresh token"}
+		return api.Response{Success: false, Message: "Error generating refresh token"}, "", ""
 	}
 	// Hash the refresh token before storing.
 	hashedRefresh := store.HashBytes([]byte(refreshToken))
 	// Store in refresh bucket with key = HashBytes(decryptedUUID).
 	hashedUUID := store.HashBytes([]byte(decryptedUUID))
 	if err := s.db.Put("refresh", hashedUUID, hashedRefresh); err != nil {
-		return api.Response{Success: false, Message: "Error saving refresh token"}
+		return api.Response{Success: false, Message: "Error saving refresh token"}, "", ""
 	}
-	return api.Response{
-		Success:      true,
-		Message:      "Login successful",
-		Token:        accessToken,
-		RefreshToken: refreshToken,
-	}
+	return api.Response{Success: true, Message: "Login successful"}, accessToken, refreshToken
 }
 
 // refreshToken validates the provided refresh token, rotates it, and returns new tokens.
 // It performs an atomic update: verifies the token hash, generates new tokens,
 // and updates the stored refresh token hash.
-func (s *serverImpl) refreshToken(req api.Request) api.Response {
-	if req.Username == "" || req.RefreshToken == "" {
-		return api.Response{Success: false, Message: "Missing credentials"}
+func (s *serverImpl) refreshToken(req api.Request, providedRefreshToken string) (api.Response, string, string) {
+	if req.Username == "" || providedRefreshToken == "" {
+		return api.Response{Success: false, Message: "Missing credentials"}, "", ""
 	}
 	// Retrieve the user's decrypted UUID.
 	decryptedUUID, err := s.lookupUUIDFromUsername(req.Username)
 	if err != nil {
-		return api.Response{Success: false, Message: "User not found"}
+		return api.Response{Success: false, Message: "User not found"}, "", ""
 	}
 	hashedUUID := store.HashBytes([]byte(decryptedUUID))
 	storedHash, err := s.db.Get("refresh", hashedUUID)
 	if err != nil {
-		return api.Response{Success: false, Message: "Refresh token not found"}
+		return api.Response{Success: false, Message: "Refresh token not found"}, "", ""
 	}
 	// Compute the hash of the incoming refresh token.
-	incomingHash := store.HashBytes([]byte(req.RefreshToken))
+	incomingHash := store.HashBytes([]byte(providedRefreshToken))
 	if hex.EncodeToString(storedHash) != hex.EncodeToString(incomingHash) {
-		return api.Response{Success: false, Message: "Invalid refresh token"}
+		return api.Response{Success: false, Message: "Invalid refresh token"}, "", ""
 	}
-	// Validate the refresh token signature using the new function.
-	_, err = validateJWTSignature(req.RefreshToken)
+	// Validate the refresh token signature.
+	_, err = validateJWTSignature(providedRefreshToken)
 	if err != nil {
-		return api.Response{Success: false, Message: "Expired or invalid refresh token"}
+		return api.Response{Success: false, Message: "Expired or invalid refresh token"}, "", ""
 	}
 	// Generate new tokens.
 	newAccessToken, err := generateAccessToken(decryptedUUID)
 	if err != nil {
-		return api.Response{Success: false, Message: "Error generating new access token"}
+		return api.Response{Success: false, Message: "Error generating new access token"}, "", ""
 	}
 	newRefreshToken, err := generateRefreshToken(decryptedUUID)
 	if err != nil {
-		return api.Response{Success: false, Message: "Error generating new refresh token"}
+		return api.Response{Success: false, Message: "Error generating new refresh token"}, "", ""
 	}
 	newHashedRefresh := store.HashBytes([]byte(newRefreshToken))
 	// Atomically update the refresh token hash.
 	if err := s.db.Put("refresh", hashedUUID, newHashedRefresh); err != nil {
-		return api.Response{Success: false, Message: "Error updating refresh token"}
+		return api.Response{Success: false, Message: "Error updating refresh token"}, "", ""
 	}
-	return api.Response{
-		Success:      true,
-		Message:      "Tokens refreshed successfully",
-		Token:        newAccessToken,
-		RefreshToken: newRefreshToken,
-	}
+	return api.Response{Success: true, Message: "Tokens refreshed successfully"}, newAccessToken, newRefreshToken
 }
 
 // fetchData verifies the access token and returns the content from the "userdata" bucket.
-func (s *serverImpl) fetchData(req api.Request) api.Response {
-	if req.Username == "" || req.Token == "" {
+func (s *serverImpl) fetchData(req api.Request, providedAccessToken string) api.Response {
+	if req.Username == "" || providedAccessToken == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
 	decryptedUUID, err := s.lookupUUIDFromUsername(req.Username)
 	if err != nil {
 		return api.Response{Success: false, Message: err.Error()}
 	}
-	if !s.isAccessTokenValid(decryptedUUID, req.Token) {
+	if !s.isAccessTokenValid(decryptedUUID, providedAccessToken) {
 		return api.Response{Success: false, Message: "Invalid or expired access token"}
 	}
 	hashedUUID := store.HashBytes([]byte(decryptedUUID))
@@ -375,15 +381,15 @@ func (s *serverImpl) fetchData(req api.Request) api.Response {
 }
 
 // updateData updates the content of "userdata" after verifying the access token.
-func (s *serverImpl) updateData(req api.Request) api.Response {
-	if req.Username == "" || req.Token == "" {
+func (s *serverImpl) updateData(req api.Request, providedAccessToken string) api.Response {
+	if req.Username == "" || providedAccessToken == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
 	decryptedUUID, err := s.lookupUUIDFromUsername(req.Username)
 	if err != nil {
 		return api.Response{Success: false, Message: err.Error()}
 	}
-	if !s.isAccessTokenValid(decryptedUUID, req.Token) {
+	if !s.isAccessTokenValid(decryptedUUID, providedAccessToken) {
 		return api.Response{Success: false, Message: "Invalid or expired access token"}
 	}
 	hashedUUID := store.HashBytes([]byte(decryptedUUID))
@@ -394,8 +400,8 @@ func (s *serverImpl) updateData(req api.Request) api.Response {
 }
 
 // logoutUser deletes the refresh token, invalidating the session.
-func (s *serverImpl) logoutUser(req api.Request) api.Response {
-	if req.Username == "" || req.RefreshToken == "" {
+func (s *serverImpl) logoutUser(req api.Request, providedRefreshToken string) api.Response {
+	if req.Username == "" || providedRefreshToken == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
 	decryptedUUID, err := s.lookupUUIDFromUsername(req.Username)
