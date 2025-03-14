@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,9 +25,9 @@ import (
 )
 
 // bucketAuthUUID and bucketAuthPassword are the hashed names of the new buckets.
-// They are created by hashing the plain text bucket names.
 var bucketAuthUUID = store.HashBytes([]byte("auth_uuid"))
 var bucketAuthPassword = store.HashBytes([]byte("auth_password"))
+var bucketAuthEmail = store.HashBytes([]byte("auth_email"))
 
 // AuthRecord represents the data stored in the auth buckets.
 type AuthRecord struct {
@@ -135,6 +136,12 @@ func hashRefreshToken(token string) string {
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
+// isValidEmail validates the email format using a regex.
+func isValidEmail(email string) bool {
+	re := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+	return re.MatchString(email)
+}
+
 // serverImpl encapsulates the state of our server.
 type serverImpl struct {
 	db  store.Store // database
@@ -224,9 +231,10 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(res)
 }
 
-// registerUser creates two entries: one in auth_uuid for the encrypted UUID, and one in auth_password for the hashed password.
+// registerUser creates three entries: one in auth_uuid for the encrypted UUID,
+// one in auth_password for the hashed password, and one in auth_email for the encrypted username.
 func (s *serverImpl) registerUser(req api.Request) api.Response {
-	if req.Username == "" || req.Password == "" {
+	if req.Username == "" || req.Password == "" || req.Email == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
 	if len(req.Username) < 8 {
@@ -235,9 +243,17 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if len(req.Password) < 8 {
 		return api.Response{Success: false, Message: "Password must have at least 8 characters"}
 	}
-	// Check if user already exists.
+	if !isValidEmail(req.Email) {
+		return api.Response{Success: false, Message: "Invalid email format"}
+	}
+	// Check if user already exists by username.
 	if exists, _ := s.userExists(req.Username); exists {
 		return api.Response{Success: false, Message: "User already exists"}
+	}
+	// Check if email already exists.
+	_, err := s.db.Get(string(bucketAuthEmail), store.HashBytes([]byte(req.Email)))
+	if err == nil {
+		return api.Response{Success: false, Message: "Email already in use"}
 	}
 	// Generate a new UUID.
 	userUUID := uuid.New().String()
@@ -257,6 +273,16 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if err := s.db.Put(string(bucketAuthPassword), keyUsername, []byte(hashedPassword)); err != nil {
 		return api.Response{Success: false, Message: "Error saving hashed password"}
 	}
+	// Encrypt username using AES-GCM-256 with key from keys/username.key.
+	encryptedUsername, err := crypto.EncryptUsername(req.Username)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error encrypting username"}
+	}
+	// Store in auth_email bucket, key = HashBytes(email).
+	keyEmail := store.HashBytes([]byte(req.Email))
+	if err := s.db.Put(string(bucketAuthEmail), keyEmail, []byte(encryptedUsername)); err != nil {
+		return api.Response{Success: false, Message: "Error saving encrypted username"}
+	}
 	// In userdata bucket, store an empty string with key = HashBytes(userUUID).
 	hashedUUID := store.HashBytes([]byte(userUUID))
 	if err := s.db.Put("userdata", hashedUUID, []byte("")); err != nil {
@@ -265,19 +291,40 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	return api.Response{Success: true, Message: "User registered"}
 }
 
+// lookupUsernameFromEmail retrieves the encrypted username from auth_email and decrypts it.
+func (s *serverImpl) lookupUsernameFromEmail(email string) (string, error) {
+	keyEmail := store.HashBytes([]byte(email))
+	encryptedUsername, err := s.db.Get(string(bucketAuthEmail), keyEmail)
+	if err != nil {
+		return "", fmt.Errorf("Email not found")
+	}
+	decryptedUsername, err := crypto.DecryptUsername(string(encryptedUsername))
+	if err != nil {
+		return "", fmt.Errorf("Error decrypting username")
+	}
+	return decryptedUsername, nil
+}
+
 // loginUser verifies the hashed password in auth_password, retrieves the encrypted UUID from auth_uuid,
 // decrypts it, then generates tokens. The refresh token is stored hashed.
+// It now uses email and password. The decrypted username is returned in Data.
 func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
-	if req.Username == "" || req.Password == "" {
+	if req.Email == "" || req.Password == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}, "", ""
 	}
-	if len(req.Username) < 8 {
-		return api.Response{Success: false, Message: "Username must have at least 8 characters"}, "", ""
+	if !isValidEmail(req.Email) {
+		return api.Response{Success: false, Message: "Invalid email format"}, "", ""
 	}
 	if len(req.Password) < 8 {
 		return api.Response{Success: false, Message: "Password must have at least 8 characters"}, "", ""
 	}
-	keyUsername := store.HashBytes([]byte(req.Username))
+	// Lookup username from email.
+	username, err := s.lookupUsernameFromEmail(req.Email)
+	if err != nil {
+		return api.Response{Success: false, Message: "User not found"}, "", ""
+	}
+	// Retrieve hashed password from auth_password using username.
+	keyUsername := store.HashBytes([]byte(username))
 	hashedPassVal, err := s.db.Get(string(bucketAuthPassword), keyUsername)
 	if err != nil {
 		return api.Response{Success: false, Message: "User not found"}, "", ""
@@ -309,7 +356,8 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 	if err := s.db.Put("refresh", hashedUUID, hashedRefresh); err != nil {
 		return api.Response{Success: false, Message: "Error saving refresh token"}, "", ""
 	}
-	return api.Response{Success: true, Message: "Login successful"}, accessToken, refreshToken
+	// Return the decrypted username in Data so the client can set currentUser.
+	return api.Response{Success: true, Message: "Login successful", Data: username}, accessToken, refreshToken
 }
 
 // refreshToken validates the provided refresh token, rotates it, and returns new tokens.

@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -149,6 +150,13 @@ func (c *client) runLoop() {
 	}
 }
 
+// isValidEmail validates the email format using a regex.
+func isValidEmail(email string) bool {
+	// simple regex for basic email validation
+	re := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+	return re.MatchString(email)
+}
+
 // registerUser requests credentials and sends them to the server for registration.
 // If registration is successful, it attempts an automatic login.
 func (c *client) registerUser() {
@@ -164,6 +172,17 @@ func (c *client) registerUser() {
 		fmt.Println("Username must have at least 8 characters")
 		return
 	}
+
+	email := ui.ReadInput("Email")
+	if email == "" {
+		fmt.Println("Email cannot be empty")
+		return
+	}
+	if !isValidEmail(email) {
+		fmt.Println("Invalid email format")
+		return
+	}
+
 	password := ui.ReadPassword("Password")
 	if password == "" {
 		fmt.Println("Password cannot be empty")
@@ -178,6 +197,7 @@ func (c *client) registerUser() {
 	res, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionRegister,
 		Username: username,
+		Email:    email,
 		Password: password,
 	})
 
@@ -191,13 +211,18 @@ func (c *client) registerUser() {
 
 		resLogin, accessToken, refreshToken := c.sendRequest(api.Request{
 			Action:   api.ActionLogin,
-			Username: username,
+			Email:    email,
 			Password: password,
 		})
 		fmt.Println("Success:", resLogin.Success)
 		fmt.Println("Message:", resLogin.Message)
 		if resLogin.Success {
-			c.currentUser = username
+			// Expecting the decrypted username in Data
+			if resLogin.Data != "" {
+				c.currentUser = resLogin.Data
+			} else {
+				c.currentUser = username
+			}
 			// Remove "Bearer " prefix if present.
 			if strings.HasPrefix(accessToken, "Bearer ") {
 				accessToken = accessToken[7:]
@@ -207,8 +232,8 @@ func (c *client) registerUser() {
 			}
 			c.authToken = accessToken
 			c.refreshToken = refreshToken
-			// Derive the encryption key using the password and username.
-			key, err := crypto.DeriveKey(password, username, "SDS-LECHUGA-BONIATO")
+			// Derive the encryption key using the password and email.
+			key, err := crypto.DeriveKey(password, email, "SDS-LECHUGA-BONIATO")
 			if err != nil {
 				fmt.Println("Error deriving encryption key:", err)
 				return
@@ -235,15 +260,16 @@ func (c *client) loginUser() {
 	ui.ClearScreen()
 	fmt.Println("** Login **")
 
-	username := ui.ReadInput("Username")
-	if username == "" {
-		fmt.Println("Username cannot be empty")
+	email := ui.ReadInput("Email")
+	if email == "" {
+		fmt.Println("Email cannot be empty")
 		return
 	}
-	if len(username) < 8 {
-		fmt.Println("Username must have at least 8 characters")
+	if !isValidEmail(email) {
+		fmt.Println("Invalid email format")
 		return
 	}
+
 	password := ui.ReadPassword("Password")
 	if password == "" {
 		fmt.Println("Password cannot be empty")
@@ -256,7 +282,7 @@ func (c *client) loginUser() {
 
 	res, accessToken, refreshToken := c.sendRequest(api.Request{
 		Action:   api.ActionLogin,
-		Username: username,
+		Email:    email,
 		Password: password,
 	})
 
@@ -265,7 +291,12 @@ func (c *client) loginUser() {
 
 	// If login is successful, save currentUser and the tokens.
 	if res.Success {
-		c.currentUser = username
+		// Expecting the decrypted username in Data
+		if res.Data != "" {
+			c.currentUser = res.Data
+		} else {
+			c.currentUser = email
+		}
 		if strings.HasPrefix(accessToken, "Bearer ") {
 			accessToken = accessToken[7:]
 		}
@@ -274,8 +305,8 @@ func (c *client) loginUser() {
 		}
 		c.authToken = accessToken
 		c.refreshToken = refreshToken
-		// Derive the encryption key using the password and username.
-		key, err := crypto.DeriveKey(password, username, "SDS-LECHUGA-BONIATO")
+		// Derive the encryption key using the password and email.
+		key, err := crypto.DeriveKey(password, email, "SDS-LECHUGA-BONIATO")
 		if err != nil {
 			fmt.Println("Error deriving encryption key:", err)
 			return

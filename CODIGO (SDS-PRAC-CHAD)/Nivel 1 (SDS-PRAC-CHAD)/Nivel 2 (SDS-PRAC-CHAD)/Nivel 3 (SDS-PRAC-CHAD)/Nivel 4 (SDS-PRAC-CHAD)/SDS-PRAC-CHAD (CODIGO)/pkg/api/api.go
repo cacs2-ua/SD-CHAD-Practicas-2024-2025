@@ -12,7 +12,8 @@ const (
 // Request structure for communication between server and client.
 type Request struct {
 	Action   string `json:"action"`
-	Username string `json:"username"`
+	Username string `json:"username,omitempty"` // optional; not used for login now
+	Email    string `json:"email,omitempty"`
 	Password string `json:"password,omitempty"`
 	Data     string `json:"data,omitempty"`
 }
