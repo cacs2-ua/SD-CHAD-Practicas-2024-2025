@@ -232,8 +232,11 @@ func (c *client) registerUser() {
 			}
 			c.authToken = accessToken
 			c.refreshToken = refreshToken
+
+			context := "LECHUGA-BONIATO-AUTH-" + email
+
 			// Derive the encryption key using the password and email.
-			key, err := crypto.DeriveKey(password, email, "SDS-LECHUGA-BONIATO")
+			key, err := crypto.DeriveKey(password, email, context)
 			if err != nil {
 				fmt.Println("Error deriving encryption key:", err)
 				return
@@ -305,8 +308,10 @@ func (c *client) loginUser() {
 		}
 		c.authToken = accessToken
 		c.refreshToken = refreshToken
+
+		context := "LECHUGA-BONIATO-AUTH-" + email
 		// Derive the encryption key using the password and email.
-		key, err := crypto.DeriveKey(password, email, "SDS-LECHUGA-BONIATO")
+		key, err := crypto.DeriveKey(password, email, context)
 		if err != nil {
 			fmt.Println("Error deriving encryption key:", err)
 			return
