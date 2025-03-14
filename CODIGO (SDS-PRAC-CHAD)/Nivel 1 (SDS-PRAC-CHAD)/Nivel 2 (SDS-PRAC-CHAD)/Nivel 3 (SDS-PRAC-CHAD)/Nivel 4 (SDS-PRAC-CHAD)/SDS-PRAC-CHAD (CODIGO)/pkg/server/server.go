@@ -24,12 +24,12 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-// Define bucket names (all bucket names are hashed with SHA3-256)
-var bucketAuthUUID = store.HashBytes([]byte("auth_uuid"))
-var bucketAuthPassword = store.HashBytes([]byte("auth_password"))
-var bucketAuthEmail = store.HashBytes([]byte("auth_email"))
-var bucketAuthUsername = store.HashBytes([]byte("auth_username"))
-var bucketAuthUsernameEmail = store.HashBytes([]byte("auth_username_email"))
+// Define bucket names (all names are now prefixed with "cheese")
+var bucketAuthUUID = store.HashBytes([]byte("cheese_auth_uuid"))
+var bucketAuthPassword = store.HashBytes([]byte("cheese_auth_password"))
+var bucketAuthEmail = store.HashBytes([]byte("cheese_auth_email"))
+var bucketAuthUsername = store.HashBytes([]byte("cheese_auth_username"))
+var bucketAuthUsernameEmail = store.HashBytes([]byte("cheese_auth_username_email"))
 
 var (
 	privateKey ed25519.PrivateKey
@@ -225,12 +225,12 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // registerUser creates the following entries:
-// 1. In auth_uuid: key = hash(email), value = encrypted(UUID)
-// 2. In auth_email: key = hash(UUID), value = hash(email)
-// 3. In auth_password: key = hash(UUID), value = hash(password)
-// 4. In auth_username: key = hash(UUID), value = encrypted(username)
-// 5. In auth_username_email: key = hash(username), value = hash(email)
-// 6. In userdata: key = hash(UUID), value = "" (empty)
+// 1. In cheese_auth_uuid: key = hash(email), value = encrypted(UUID)
+// 2. In cheese_auth_email: key = hash(UUID), value = hash(email)
+// 3. In cheese_auth_password: key = hash(UUID), value = hash(password)
+// 4. In cheese_auth_username: key = hash(UUID), value = encrypted(username)
+// 5. In cheese_auth_username_email: key = hash(username), value = hash(email)
+// 6. In cheese_userdata: key = hash(UUID), value = "" (empty)
 func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if req.Username == "" || req.Password == "" || req.Email == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
@@ -244,13 +244,13 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if !isValidEmail(req.Email) {
 		return api.Response{Success: false, Message: "Invalid email format"}
 	}
-	// Check if username already exists using auth_username_email.
+	// Check if username already exists using cheese_auth_username_email.
 	keyUsername := store.HashBytes([]byte(req.Username))
 	_, err := s.db.Get(string(bucketAuthUsernameEmail), keyUsername)
 	if err == nil {
 		return api.Response{Success: false, Message: "That username is already taken"}
 	}
-	// Check if email already exists using auth_uuid.
+	// Check if email already exists using cheese_auth_uuid.
 	keyEmail := store.HashBytes([]byte(req.Email))
 	_, err = s.db.Get(string(bucketAuthUUID), keyEmail)
 	if err == nil {
@@ -275,28 +275,28 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	// Store entries.
 	keyUUID := store.HashBytes([]byte(userUUID))
 
-	// In auth_uuid: key = hash(email), value = encryptedUUID.
+	// In cheese_auth_uuid: key = hash(email), value = encryptedUUID.
 	if err := s.db.Put(string(bucketAuthUUID), keyEmail, []byte(encryptedUUID)); err != nil {
 		return api.Response{Success: false, Message: "Error saving encrypted UUID"}
 	}
-	// In auth_email: key = hash(UUID), value = hash(email).
+	// In cheese_auth_email: key = hash(UUID), value = hash(email).
 	if err := s.db.Put(string(bucketAuthEmail), keyUUID, keyEmail); err != nil {
 		return api.Response{Success: false, Message: "Error saving hashed email"}
 	}
-	// In auth_password: key = hash(UUID), value = hashedPassword.
+	// In cheese_auth_password: key = hash(UUID), value = hashedPassword.
 	if err := s.db.Put(string(bucketAuthPassword), keyUUID, []byte(hashedPassword)); err != nil {
 		return api.Response{Success: false, Message: "Error saving hashed password"}
 	}
-	// In auth_username: key = hash(UUID), value = encryptedUsername.
+	// In cheese_auth_username: key = hash(UUID), value = encryptedUsername.
 	if err := s.db.Put(string(bucketAuthUsername), keyUUID, []byte(encryptedUsername)); err != nil {
 		return api.Response{Success: false, Message: "Error saving encrypted username"}
 	}
-	// In auth_username_email: key = hash(username), value = hash(email).
+	// In cheese_auth_username_email: key = hash(username), value = hash(email).
 	if err := s.db.Put(string(bucketAuthUsernameEmail), keyUsername, keyEmail); err != nil {
 		return api.Response{Success: false, Message: "Error saving username-email mapping"}
 	}
-	// In userdata: key = hash(UUID), value = "".
-	if err := s.db.Put("userdata", keyUUID, []byte("")); err != nil {
+	// In cheese_userdata: key = hash(UUID), value = "".
+	if err := s.db.Put("cheese_userdata", keyUUID, []byte("")); err != nil {
 		return api.Response{Success: false, Message: "Error initializing user data"}
 	}
 
@@ -304,8 +304,8 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 }
 
 // lookupUUIDFromUsername obtains the user's UUID by using the following chain:
-// 1. Look up auth_username_email with key = hash(username) to obtain hashed email.
-// 2. Look up auth_uuid with key = hashed email to get encrypted UUID and decrypt it.
+// 1. Look up cheese_auth_username_email with key = hash(username) to obtain hashed email.
+// 2. Look up cheese_auth_uuid with key = hashed email to get encrypted UUID and decrypt it.
 func (s *serverImpl) lookupUUIDFromUsername(username string) (string, error) {
 	keyUsername := store.HashBytes([]byte(username))
 	hashedEmail, err := s.db.Get(string(bucketAuthUsernameEmail), keyUsername)
@@ -325,10 +325,10 @@ func (s *serverImpl) lookupUUIDFromUsername(username string) (string, error) {
 
 // loginUser uses email and password to login.
 // Steps:
-// 1. Use email to retrieve encrypted UUID from auth_uuid.
+// 1. Use email to retrieve encrypted UUID from cheese_auth_uuid.
 // 2. Decrypt UUID.
-// 3. Use UUID to get hashed password from auth_password and compare.
-// 4. Use UUID to get encrypted username from auth_username and decrypt it.
+// 3. Use UUID to get hashed password from cheese_auth_password and compare.
+// 4. Use UUID to get encrypted username from cheese_auth_username and decrypt it.
 // 5. Generate tokens.
 func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 	if req.Email == "" || req.Password == "" {
@@ -375,7 +375,7 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 		return api.Response{Success: false, Message: "Error generating refresh token"}, "", ""
 	}
 	hashedRefresh := store.HashBytes([]byte(refreshToken))
-	if err := s.db.Put("refresh", keyUUID, hashedRefresh); err != nil {
+	if err := s.db.Put("cheese_refresh", keyUUID, hashedRefresh); err != nil {
 		return api.Response{Success: false, Message: "Error saving refresh token"}, "", ""
 	}
 	return api.Response{Success: true, Message: "Login successful", Data: username}, accessToken, refreshToken
@@ -391,7 +391,7 @@ func (s *serverImpl) refreshToken(req api.Request, providedRefreshToken string) 
 		return api.Response{Success: false, Message: "User not found"}, "", ""
 	}
 	keyUUID := store.HashBytes([]byte(decryptedUUID))
-	storedHash, err := s.db.Get("refresh", keyUUID)
+	storedHash, err := s.db.Get("cheese_refresh", keyUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Refresh token not found"}, "", ""
 	}
@@ -412,13 +412,13 @@ func (s *serverImpl) refreshToken(req api.Request, providedRefreshToken string) 
 		return api.Response{Success: false, Message: "Error generating new refresh token"}, "", ""
 	}
 	newHashedRefresh := store.HashBytes([]byte(newRefreshToken))
-	if err := s.db.Put("refresh", keyUUID, newHashedRefresh); err != nil {
+	if err := s.db.Put("cheese_refresh", keyUUID, newHashedRefresh); err != nil {
 		return api.Response{Success: false, Message: "Error updating refresh token"}, "", ""
 	}
 	return api.Response{Success: true, Message: "Tokens refreshed successfully"}, newAccessToken, newRefreshToken
 }
 
-// fetchData verifies the access token and returns the content from the "userdata" bucket.
+// fetchData verifies the access token and returns the content from the "cheese_userdata" bucket.
 func (s *serverImpl) fetchData(req api.Request, providedAccessToken string) api.Response {
 	if req.Username == "" || providedAccessToken == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
@@ -431,7 +431,7 @@ func (s *serverImpl) fetchData(req api.Request, providedAccessToken string) api.
 		return api.Response{Success: false, Message: "Invalid or expired access token"}
 	}
 	keyUUID := store.HashBytes([]byte(decryptedUUID))
-	rawData, err := s.db.Get("userdata", keyUUID)
+	rawData, err := s.db.Get("cheese_userdata", keyUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error retrieving user data"}
 	}
@@ -442,7 +442,7 @@ func (s *serverImpl) fetchData(req api.Request, providedAccessToken string) api.
 	}
 }
 
-// updateData updates the "userdata" bucket after verifying the access token.
+// updateData updates the "cheese_userdata" bucket after verifying the access token.
 func (s *serverImpl) updateData(req api.Request, providedAccessToken string) api.Response {
 	if req.Username == "" || providedAccessToken == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
@@ -455,7 +455,7 @@ func (s *serverImpl) updateData(req api.Request, providedAccessToken string) api
 		return api.Response{Success: false, Message: "Invalid or expired access token"}
 	}
 	keyUUID := store.HashBytes([]byte(decryptedUUID))
-	if err := s.db.Put("userdata", keyUUID, []byte(req.Data)); err != nil {
+	if err := s.db.Put("cheese_userdata", keyUUID, []byte(req.Data)); err != nil {
 		return api.Response{Success: false, Message: "Error updating user data"}
 	}
 	return api.Response{Success: true, Message: "User data updated"}
@@ -471,23 +471,10 @@ func (s *serverImpl) logoutUser(req api.Request, providedRefreshToken string) ap
 		return api.Response{Success: false, Message: err.Error()}
 	}
 	keyUUID := store.HashBytes([]byte(decryptedUUID))
-	if err := s.db.Delete("refresh", keyUUID); err != nil {
+	if err := s.db.Delete("cheese_refresh", keyUUID); err != nil {
 		return api.Response{Success: false, Message: "Error closing session"}
 	}
 	return api.Response{Success: true, Message: "Session closed successfully"}
-}
-
-// userExists checks if the username is already taken by looking in auth_username_email.
-func (s *serverImpl) userExists(username string) (bool, error) {
-	keyUsername := store.HashBytes([]byte(username))
-	_, err := s.db.Get(string(bucketAuthUsernameEmail), keyUsername)
-	if err != nil {
-		if strings.Contains(err.Error(), "key not found") || strings.Contains(err.Error(), "bucket not found") {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
 }
 
 // isAccessTokenValid verifies the token signature and expiration using the user UUID.
