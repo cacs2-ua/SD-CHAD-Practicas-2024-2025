@@ -103,7 +103,7 @@ func generateAccessToken(userUUID string) (string, error) {
 		Subject:   userUUID,
 		ExpiresAt: time.Now().Add(time.Minute).Unix(),
 		IssuedAt:  time.Now().Unix(),
-		Issuer:    "lechuga-boniato-server",
+		Issuer:    "tomato-potato-server",
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
 	return token.SignedString(privateKey)
@@ -115,7 +115,7 @@ func generateRefreshToken(userUUID string) (string, error) {
 		Subject:   userUUID,
 		ExpiresAt: time.Now().Add(7 * 24 * time.Hour).Unix(),
 		IssuedAt:  time.Now().Unix(),
-		Issuer:    "lechuga-boniato-server",
+		Issuer:    "tomato-potato-server",
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
 	return token.SignedString(privateKey)
