@@ -159,7 +159,8 @@ func Run() error {
 	return err
 }
 
-// apiHandler decodes the JSON request, dispatches it, and returns the JSON response.
+// apiHandler decodes the JSON request, extracts the JWT from the Authorization header (if present),
+// dispatches the request and returns the JSON response.
 func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -170,6 +171,22 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
 		return
 	}
+
+	// Extract token from Authorization header if present.
+	authHeader := r.Header.Get("Authorization")
+	if authHeader != "" {
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) == 2 && parts[0] == "Bearer" {
+			tokenValue := parts[1]
+			// For refresh and logout actions, assign tokenValue to RefreshToken.
+			if req.Action == api.ActionRefresh || req.Action == api.ActionLogout {
+				req.RefreshToken = tokenValue
+			} else {
+				req.Token = tokenValue
+			}
+		}
+	}
+
 	var res api.Response
 	switch req.Action {
 	case api.ActionRegister:
@@ -195,6 +212,9 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if req.Username == "" || req.Password == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
+	}
+	if len(req.Username) < 8 {
+		return api.Response{Success: false, Message: "Username must have at least 8 characters"}
 	}
 	if len(req.Password) < 8 {
 		return api.Response{Success: false, Message: "Password must have at least 8 characters"}
@@ -234,6 +254,9 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 func (s *serverImpl) loginUser(req api.Request) api.Response {
 	if req.Username == "" || req.Password == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
+	}
+	if len(req.Username) < 8 {
+		return api.Response{Success: false, Message: "Username must have at least 8 characters"}
 	}
 	if len(req.Password) < 8 {
 		return api.Response{Success: false, Message: "Password must have at least 8 characters"}

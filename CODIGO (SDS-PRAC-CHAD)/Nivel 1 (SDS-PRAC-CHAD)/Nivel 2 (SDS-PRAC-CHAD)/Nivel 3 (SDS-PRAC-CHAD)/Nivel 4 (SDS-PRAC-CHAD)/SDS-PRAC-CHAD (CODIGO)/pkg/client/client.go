@@ -156,13 +156,15 @@ func (c *client) registerUser() {
 	fmt.Println("** User Registration **")
 
 	username := ui.ReadInput("Username")
-	password := ui.ReadPassword("Password")
-
-	// Client-side validation
 	if username == "" {
 		fmt.Println("Username cannot be empty")
 		return
 	}
+	if len(username) < 8 {
+		fmt.Println("Username must have at least 8 characters")
+		return
+	}
+	password := ui.ReadPassword("Password")
 	if password == "" {
 		fmt.Println("Password cannot be empty")
 		return
@@ -225,13 +227,15 @@ func (c *client) loginUser() {
 	fmt.Println("** Login **")
 
 	username := ui.ReadInput("Username")
-	password := ui.ReadPassword("Password")
-
-	// Client-side validation
 	if username == "" {
 		fmt.Println("Username cannot be empty")
 		return
 	}
+	if len(username) < 8 {
+		fmt.Println("Username must have at least 8 characters")
+		return
+	}
+	password := ui.ReadPassword("Password")
 	if password == "" {
 		fmt.Println("Password cannot be empty")
 		return
@@ -320,7 +324,6 @@ func (c *client) fetchData() {
 	res := c.sendRequest(api.Request{
 		Action:   api.ActionFetchData,
 		Username: c.currentUser,
-		Token:    c.authToken,
 	})
 
 	fmt.Println("Success:", res.Success)
@@ -375,7 +378,6 @@ func (c *client) updateData() {
 	res := c.sendRequest(api.Request{
 		Action:   api.ActionUpdateData,
 		Username: c.currentUser,
-		Token:    c.authToken,
 		Data:     encodedData,
 	})
 
@@ -396,9 +398,8 @@ func (c *client) logoutUser() {
 
 	// Send the logout request.
 	res := c.sendRequest(api.Request{
-		Action:       api.ActionLogout,
-		Username:     c.currentUser,
-		RefreshToken: c.refreshToken,
+		Action:   api.ActionLogout,
+		Username: c.currentUser,
 	})
 
 	fmt.Println("Success:", res.Success)
@@ -419,15 +420,32 @@ func (c *client) logoutUser() {
 // It is used for all actions.
 func (c *client) sendRequest(req api.Request) api.Response {
 	jsonData, _ := json.Marshal(req)
-	// Use HTTPS for secure transport.
-	resp, err := http.Post("https://localhost:8080/api", "application/json", bytes.NewBuffer(jsonData))
+	// Create a new HTTP request.
+	request, err := http.NewRequest("POST", "https://localhost:8080/api", bytes.NewBuffer(jsonData))
 	if err != nil {
-		fmt.Println("Error contacting the server:", err)
+		fmt.Println("Error creating request:", err)
+		return api.Response{Success: false, Message: "Request error"}
+	}
+	request.Header.Set("Content-Type", "application/json")
+	// Set Authorization header based on the action.
+	switch req.Action {
+	case api.ActionFetchData, api.ActionUpdateData:
+		if c.authToken != "" {
+			request.Header.Set("Authorization", "Bearer "+c.authToken)
+		}
+	case api.ActionRefresh, api.ActionLogout:
+		if c.refreshToken != "" {
+			request.Header.Set("Authorization", "Bearer "+c.refreshToken)
+		}
+	}
+	client := &http.Client{}
+	resp, err := client.Do(request)
+	if err != nil {
+		fmt.Println("Error contacting server:", err)
 		return api.Response{Success: false, Message: "Connection error"}
 	}
 	defer resp.Body.Close()
 
-	// Read the response body and unmarshal into an api.Response.
 	body, _ := io.ReadAll(resp.Body)
 	var res api.Response
 	_ = json.Unmarshal(body, &res)
