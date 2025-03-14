@@ -24,15 +24,12 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-// bucketAuthUUID and bucketAuthPassword are the hashed names of the new buckets.
+// Define bucket names (all bucket names are hashed with SHA3-256)
 var bucketAuthUUID = store.HashBytes([]byte("auth_uuid"))
 var bucketAuthPassword = store.HashBytes([]byte("auth_password"))
 var bucketAuthEmail = store.HashBytes([]byte("auth_email"))
-
-// AuthRecord represents the data stored in the auth buckets.
-type AuthRecord struct {
-	EncryptedUUID string `json:"encrypted_uuid"`
-}
+var bucketAuthUsername = store.HashBytes([]byte("auth_username"))
+var bucketAuthUsernameEmail = store.HashBytes([]byte("auth_username_email"))
 
 var (
 	privateKey ed25519.PrivateKey
@@ -80,10 +77,8 @@ func init() {
 }
 
 // validateJWTSignature parses the token string and validates its signature using the public key.
-// It returns the parsed token if valid, or an error otherwise.
 func validateJWTSignature(tokenStr string) (*jwt.Token, error) {
 	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
-		// Check that the token is signed with the expected method.
 		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
@@ -122,7 +117,7 @@ func generateRefreshToken(userUUID string) (string, error) {
 	return token.SignedString(privateKey)
 }
 
-// hashPasswordSHA3 hashes a password using SHA-3 (SHA-256) and returns a hex-encoded string.
+// hashPasswordSHA3 hashes a password using SHA3-256 and returns a hex-encoded string.
 func hashPasswordSHA3(password string) string {
 	hasher := sha3.New256()
 	hasher.Write([]byte(password))
@@ -144,8 +139,8 @@ func isValidEmail(email string) bool {
 
 // serverImpl encapsulates the state of our server.
 type serverImpl struct {
-	db  store.Store // database
-	log *log.Logger // logger for error and info messages
+	db  store.Store
+	log *log.Logger
 }
 
 // Run starts the database and the HTTPS server.
@@ -166,8 +161,7 @@ func Run() error {
 	return err
 }
 
-// apiHandler decodes the JSON request, extracts the JWT tokens from the proper headers,
-// dispatches the request and returns the JSON response.
+// apiHandler decodes the JSON request, dispatches the action, and returns the JSON response.
 func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -179,7 +173,7 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract access token from "Authorization" header.
+	// Extract access token from Authorization header.
 	authHeader := r.Header.Get("Authorization")
 	var providedAccessToken string
 	if authHeader != "" {
@@ -189,7 +183,7 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Extract refresh token from "X-Refresh-Token" header.
+	// Extract refresh token from X-Refresh-Token header.
 	refreshHeader := r.Header.Get("X-Refresh-Token")
 	var providedRefreshToken string
 	if refreshHeader != "" {
@@ -219,7 +213,6 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res = api.Response{Success: false, Message: "Unknown action"}
 	}
 
-	// Set tokens in headers for actions that generate tokens.
 	if newAccessToken != "" {
 		w.Header().Set("Authorization", "Bearer "+newAccessToken)
 	}
@@ -231,8 +224,13 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(res)
 }
 
-// registerUser creates three entries: one in auth_uuid for the encrypted UUID,
-// one in auth_password for the hashed password, and one in auth_email for the encrypted username.
+// registerUser creates the following entries:
+// 1. In auth_uuid: key = hash(email), value = encrypted(UUID)
+// 2. In auth_email: key = hash(UUID), value = hash(email)
+// 3. In auth_password: key = hash(UUID), value = hash(password)
+// 4. In auth_username: key = hash(UUID), value = encrypted(username)
+// 5. In auth_username_email: key = hash(username), value = hash(email)
+// 6. In userdata: key = hash(UUID), value = "" (empty)
 func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if req.Username == "" || req.Password == "" || req.Email == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
@@ -246,15 +244,19 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if !isValidEmail(req.Email) {
 		return api.Response{Success: false, Message: "Invalid email format"}
 	}
-	// Check if the username is already taken.
-	if exists, _ := s.userExists(req.Username); exists {
+	// Check if username already exists using auth_username_email.
+	keyUsername := store.HashBytes([]byte(req.Username))
+	_, err := s.db.Get(string(bucketAuthUsernameEmail), keyUsername)
+	if err == nil {
 		return api.Response{Success: false, Message: "That username is already taken"}
 	}
-	// Check if email already exists.
-	_, err := s.db.Get(string(bucketAuthEmail), store.HashBytes([]byte(req.Email)))
+	// Check if email already exists using auth_uuid.
+	keyEmail := store.HashBytes([]byte(req.Email))
+	_, err = s.db.Get(string(bucketAuthUUID), keyEmail)
 	if err == nil {
 		return api.Response{Success: false, Message: "Email already in use"}
 	}
+
 	// Generate a new UUID.
 	userUUID := uuid.New().String()
 	// Encrypt the UUID.
@@ -262,52 +264,72 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if err != nil {
 		return api.Response{Success: false, Message: "Error encrypting UUID"}
 	}
-	// Hash the password using SHA3.
+	// Hash the password.
 	hashedPassword := hashPasswordSHA3(req.Password)
-	// Store encrypted UUID in auth_uuid bucket, key = HashBytes(username).
-	keyUsername := store.HashBytes([]byte(req.Username))
-	if err := s.db.Put(string(bucketAuthUUID), keyUsername, []byte(encryptedUUID)); err != nil {
-		return api.Response{Success: false, Message: "Error saving encrypted UUID"}
-	}
-	// Store hashed password in auth_password bucket, key = HashBytes(username).
-	if err := s.db.Put(string(bucketAuthPassword), keyUsername, []byte(hashedPassword)); err != nil {
-		return api.Response{Success: false, Message: "Error saving hashed password"}
-	}
-	// Encrypt username using AES-GCM-256 with key from keys/username.key.
+	// Encrypt the username.
 	encryptedUsername, err := crypto.EncryptUsername(req.Username)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error encrypting username"}
 	}
-	// Store in auth_email bucket, key = HashBytes(email).
-	keyEmail := store.HashBytes([]byte(req.Email))
-	if err := s.db.Put(string(bucketAuthEmail), keyEmail, []byte(encryptedUsername)); err != nil {
+
+	// Store entries.
+	keyUUID := store.HashBytes([]byte(userUUID))
+
+	// In auth_uuid: key = hash(email), value = encryptedUUID.
+	if err := s.db.Put(string(bucketAuthUUID), keyEmail, []byte(encryptedUUID)); err != nil {
+		return api.Response{Success: false, Message: "Error saving encrypted UUID"}
+	}
+	// In auth_email: key = hash(UUID), value = hash(email).
+	if err := s.db.Put(string(bucketAuthEmail), keyUUID, keyEmail); err != nil {
+		return api.Response{Success: false, Message: "Error saving hashed email"}
+	}
+	// In auth_password: key = hash(UUID), value = hashedPassword.
+	if err := s.db.Put(string(bucketAuthPassword), keyUUID, []byte(hashedPassword)); err != nil {
+		return api.Response{Success: false, Message: "Error saving hashed password"}
+	}
+	// In auth_username: key = hash(UUID), value = encryptedUsername.
+	if err := s.db.Put(string(bucketAuthUsername), keyUUID, []byte(encryptedUsername)); err != nil {
 		return api.Response{Success: false, Message: "Error saving encrypted username"}
 	}
-	// In userdata bucket, store an empty string with key = HashBytes(userUUID).
-	hashedUUID := store.HashBytes([]byte(userUUID))
-	if err := s.db.Put("userdata", hashedUUID, []byte("")); err != nil {
+	// In auth_username_email: key = hash(username), value = hash(email).
+	if err := s.db.Put(string(bucketAuthUsernameEmail), keyUsername, keyEmail); err != nil {
+		return api.Response{Success: false, Message: "Error saving username-email mapping"}
+	}
+	// In userdata: key = hash(UUID), value = "".
+	if err := s.db.Put("userdata", keyUUID, []byte("")); err != nil {
 		return api.Response{Success: false, Message: "Error initializing user data"}
 	}
+
 	return api.Response{Success: true, Message: "User registered"}
 }
 
-// lookupUsernameFromEmail retrieves the encrypted username from auth_email and decrypts it.
-func (s *serverImpl) lookupUsernameFromEmail(email string) (string, error) {
-	keyEmail := store.HashBytes([]byte(email))
-	encryptedUsername, err := s.db.Get(string(bucketAuthEmail), keyEmail)
+// lookupUUIDFromUsername obtains the user's UUID by using the following chain:
+// 1. Look up auth_username_email with key = hash(username) to obtain hashed email.
+// 2. Look up auth_uuid with key = hashed email to get encrypted UUID and decrypt it.
+func (s *serverImpl) lookupUUIDFromUsername(username string) (string, error) {
+	keyUsername := store.HashBytes([]byte(username))
+	hashedEmail, err := s.db.Get(string(bucketAuthUsernameEmail), keyUsername)
 	if err != nil {
-		return "", fmt.Errorf("Email not found")
+		return "", fmt.Errorf("User not found")
 	}
-	decryptedUsername, err := crypto.DecryptUsername(string(encryptedUsername))
+	encryptedUUID, err := s.db.Get(string(bucketAuthUUID), hashedEmail)
 	if err != nil {
-		return "", fmt.Errorf("Error decrypting username")
+		return "", fmt.Errorf("User not found")
 	}
-	return decryptedUsername, nil
+	decryptedUUID, err := crypto.DecryptUUID(string(encryptedUUID))
+	if err != nil {
+		return "", fmt.Errorf("Error decrypting UUID")
+	}
+	return decryptedUUID, nil
 }
 
-// loginUser verifies the hashed password in auth_password, retrieves the encrypted UUID from auth_uuid,
-// decrypts it, then generates tokens. The refresh token is stored hashed.
-// It now uses email and password. The decrypted username is returned in Data.
+// loginUser uses email and password to login.
+// Steps:
+// 1. Use email to retrieve encrypted UUID from auth_uuid.
+// 2. Decrypt UUID.
+// 3. Use UUID to get hashed password from auth_password and compare.
+// 4. Use UUID to get encrypted username from auth_username and decrypt it.
+// 5. Generate tokens.
 func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 	if req.Email == "" || req.Password == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}, "", ""
@@ -318,14 +340,17 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 	if len(req.Password) < 8 {
 		return api.Response{Success: false, Message: "Password must have at least 8 characters"}, "", ""
 	}
-	// Lookup username from email.
-	username, err := s.lookupUsernameFromEmail(req.Email)
+	keyEmail := store.HashBytes([]byte(req.Email))
+	encryptedUUID, err := s.db.Get(string(bucketAuthUUID), keyEmail)
 	if err != nil {
 		return api.Response{Success: false, Message: "Invalid credentials"}, "", ""
 	}
-	// Retrieve hashed password from auth_password using username.
-	keyUsername := store.HashBytes([]byte(username))
-	hashedPassVal, err := s.db.Get(string(bucketAuthPassword), keyUsername)
+	decryptedUUID, err := crypto.DecryptUUID(string(encryptedUUID))
+	if err != nil {
+		return api.Response{Success: false, Message: "Error decrypting UUID"}, "", ""
+	}
+	keyUUID := store.HashBytes([]byte(decryptedUUID))
+	hashedPassVal, err := s.db.Get(string(bucketAuthPassword), keyUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Invalid credentials"}, "", ""
 	}
@@ -333,13 +358,13 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 	if string(hashedPassVal) != incomingHashed {
 		return api.Response{Success: false, Message: "Invalid credentials"}, "", ""
 	}
-	encryptedUUID, err := s.db.Get(string(bucketAuthUUID), keyUsername)
+	encryptedUsername, err := s.db.Get(string(bucketAuthUsername), keyUUID)
 	if err != nil {
-		return api.Response{Success: false, Message: "Error retrieving UUID"}, "", ""
+		return api.Response{Success: false, Message: "Error retrieving username"}, "", ""
 	}
-	decryptedUUID, err := crypto.DecryptUUID(string(encryptedUUID))
+	username, err := crypto.DecryptUsername(string(encryptedUsername))
 	if err != nil {
-		return api.Response{Success: false, Message: "Error decrypting UUID"}, "", ""
+		return api.Response{Success: false, Message: "Error decrypting username"}, "", ""
 	}
 	accessToken, err := generateAccessToken(decryptedUUID)
 	if err != nil {
@@ -349,45 +374,35 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 	if err != nil {
 		return api.Response{Success: false, Message: "Error generating refresh token"}, "", ""
 	}
-	// Hash the refresh token before storing.
 	hashedRefresh := store.HashBytes([]byte(refreshToken))
-	// Store in refresh bucket with key = HashBytes(decryptedUUID).
-	hashedUUID := store.HashBytes([]byte(decryptedUUID))
-	if err := s.db.Put("refresh", hashedUUID, hashedRefresh); err != nil {
+	if err := s.db.Put("refresh", keyUUID, hashedRefresh); err != nil {
 		return api.Response{Success: false, Message: "Error saving refresh token"}, "", ""
 	}
-	// Return the decrypted username in Data so the client can set currentUser.
 	return api.Response{Success: true, Message: "Login successful", Data: username}, accessToken, refreshToken
 }
 
-// refreshToken validates the provided refresh token, rotates it, and returns new tokens.
-// It performs an atomic update: verifies the token hash, generates new tokens,
-// and updates the stored refresh token hash.
+// refreshToken validates the provided refresh token and rotates it.
 func (s *serverImpl) refreshToken(req api.Request, providedRefreshToken string) (api.Response, string, string) {
 	if req.Username == "" || providedRefreshToken == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}, "", ""
 	}
-	// Retrieve the user's decrypted UUID.
 	decryptedUUID, err := s.lookupUUIDFromUsername(req.Username)
 	if err != nil {
 		return api.Response{Success: false, Message: "User not found"}, "", ""
 	}
-	hashedUUID := store.HashBytes([]byte(decryptedUUID))
-	storedHash, err := s.db.Get("refresh", hashedUUID)
+	keyUUID := store.HashBytes([]byte(decryptedUUID))
+	storedHash, err := s.db.Get("refresh", keyUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Refresh token not found"}, "", ""
 	}
-	// Compute the hash of the incoming refresh token.
 	incomingHash := store.HashBytes([]byte(providedRefreshToken))
 	if hex.EncodeToString(storedHash) != hex.EncodeToString(incomingHash) {
 		return api.Response{Success: false, Message: "Invalid refresh token"}, "", ""
 	}
-	// Validate the refresh token signature.
 	_, err = validateJWTSignature(providedRefreshToken)
 	if err != nil {
 		return api.Response{Success: false, Message: "Expired or invalid refresh token"}, "", ""
 	}
-	// Generate new tokens.
 	newAccessToken, err := generateAccessToken(decryptedUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error generating new access token"}, "", ""
@@ -397,8 +412,7 @@ func (s *serverImpl) refreshToken(req api.Request, providedRefreshToken string) 
 		return api.Response{Success: false, Message: "Error generating new refresh token"}, "", ""
 	}
 	newHashedRefresh := store.HashBytes([]byte(newRefreshToken))
-	// Atomically update the refresh token hash.
-	if err := s.db.Put("refresh", hashedUUID, newHashedRefresh); err != nil {
+	if err := s.db.Put("refresh", keyUUID, newHashedRefresh); err != nil {
 		return api.Response{Success: false, Message: "Error updating refresh token"}, "", ""
 	}
 	return api.Response{Success: true, Message: "Tokens refreshed successfully"}, newAccessToken, newRefreshToken
@@ -416,8 +430,8 @@ func (s *serverImpl) fetchData(req api.Request, providedAccessToken string) api.
 	if !s.isAccessTokenValid(decryptedUUID, providedAccessToken) {
 		return api.Response{Success: false, Message: "Invalid or expired access token"}
 	}
-	hashedUUID := store.HashBytes([]byte(decryptedUUID))
-	rawData, err := s.db.Get("userdata", hashedUUID)
+	keyUUID := store.HashBytes([]byte(decryptedUUID))
+	rawData, err := s.db.Get("userdata", keyUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error retrieving user data"}
 	}
@@ -428,7 +442,7 @@ func (s *serverImpl) fetchData(req api.Request, providedAccessToken string) api.
 	}
 }
 
-// updateData updates the content of "userdata" after verifying the access token.
+// updateData updates the "userdata" bucket after verifying the access token.
 func (s *serverImpl) updateData(req api.Request, providedAccessToken string) api.Response {
 	if req.Username == "" || providedAccessToken == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
@@ -440,8 +454,8 @@ func (s *serverImpl) updateData(req api.Request, providedAccessToken string) api
 	if !s.isAccessTokenValid(decryptedUUID, providedAccessToken) {
 		return api.Response{Success: false, Message: "Invalid or expired access token"}
 	}
-	hashedUUID := store.HashBytes([]byte(decryptedUUID))
-	if err := s.db.Put("userdata", hashedUUID, []byte(req.Data)); err != nil {
+	keyUUID := store.HashBytes([]byte(decryptedUUID))
+	if err := s.db.Put("userdata", keyUUID, []byte(req.Data)); err != nil {
 		return api.Response{Success: false, Message: "Error updating user data"}
 	}
 	return api.Response{Success: true, Message: "User data updated"}
@@ -456,17 +470,17 @@ func (s *serverImpl) logoutUser(req api.Request, providedRefreshToken string) ap
 	if err != nil {
 		return api.Response{Success: false, Message: err.Error()}
 	}
-	hashedUUID := store.HashBytes([]byte(decryptedUUID))
-	if err := s.db.Delete("refresh", hashedUUID); err != nil {
+	keyUUID := store.HashBytes([]byte(decryptedUUID))
+	if err := s.db.Delete("refresh", keyUUID); err != nil {
 		return api.Response{Success: false, Message: "Error closing session"}
 	}
 	return api.Response{Success: true, Message: "Session closed successfully"}
 }
 
-// userExists checks if the user exists in auth_password.
+// userExists checks if the username is already taken by looking in auth_username_email.
 func (s *serverImpl) userExists(username string) (bool, error) {
 	keyUsername := store.HashBytes([]byte(username))
-	_, err := s.db.Get(string(bucketAuthPassword), keyUsername)
+	_, err := s.db.Get(string(bucketAuthUsernameEmail), keyUsername)
 	if err != nil {
 		if strings.Contains(err.Error(), "key not found") || strings.Contains(err.Error(), "bucket not found") {
 			return false, nil
@@ -490,18 +504,4 @@ func (s *serverImpl) isAccessTokenValid(userUUID, tokenString string) bool {
 		return false
 	}
 	return true
-}
-
-// lookupUUIDFromUsername retrieves the encrypted UUID from auth_uuid and decrypts it.
-func (s *serverImpl) lookupUUIDFromUsername(username string) (string, error) {
-	keyUsername := store.HashBytes([]byte(username))
-	encryptedUUID, err := s.db.Get(string(bucketAuthUUID), keyUsername)
-	if err != nil {
-		return "", fmt.Errorf("User not found")
-	}
-	decryptedUUID, err := crypto.DecryptUUID(string(encryptedUUID))
-	if err != nil {
-		return "", fmt.Errorf("Error decrypting UUID")
-	}
-	return decryptedUUID, nil
 }
