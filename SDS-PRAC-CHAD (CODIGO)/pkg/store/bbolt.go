@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"prac/pkg/crypto"
+
 	"go.etcd.io/bbolt"
 	"golang.org/x/crypto/sha3"
 )
@@ -49,8 +51,12 @@ func NewBboltStore(path string) (*BboltStore, error) {
 }
 
 // Put stores or updates (key, value) within a bucket (namespace).
-// Sub-buckets are not supported.
+// The value is encrypted using the server key before storage.
 func (s *BboltStore) Put(namespace string, key, value []byte) error {
+	encryptedValue, err := crypto.EncryptServer(value)
+	if err != nil {
+		return fmt.Errorf("error encrypting value: %v", err)
+	}
 	actualKey := getKey(namespace, key)
 	hashedNamespace := HashBytes([]byte(namespace))
 	return s.DB.Update(func(tx *bbolt.Tx) error {
@@ -58,27 +64,35 @@ func (s *BboltStore) Put(namespace string, key, value []byte) error {
 		if err != nil {
 			return fmt.Errorf("error creating/opening bucket '%s': %v", hex.EncodeToString(hashedNamespace), err)
 		}
-		return b.Put(actualKey, value)
+		return b.Put(actualKey, encryptedValue)
 	})
 }
 
 // Get retrieves the value for the given key in the bucket (namespace).
+// The retrieved data is decrypted using the server key.
 func (s *BboltStore) Get(namespace string, key []byte) ([]byte, error) {
 	actualKey := getKey(namespace, key)
 	hashedNamespace := HashBytes([]byte(namespace))
-	var val []byte
+	var encryptedVal []byte
 	err := s.DB.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(hashedNamespace)
 		if b == nil {
 			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(hashedNamespace))
 		}
-		val = b.Get(actualKey)
-		if val == nil {
+		encryptedVal = b.Get(actualKey)
+		if encryptedVal == nil {
 			return fmt.Errorf("key not found: %s", hex.EncodeToString(actualKey))
 		}
 		return nil
 	})
-	return val, err
+	if err != nil {
+		return nil, err
+	}
+	decryptedVal, err := crypto.DecryptServer(encryptedVal)
+	if err != nil {
+		return nil, fmt.Errorf("error decrypting value: %v", err)
+	}
+	return decryptedVal, nil
 }
 
 // Delete removes the key from the bucket (namespace).
@@ -147,6 +161,7 @@ func (s *BboltStore) Close() error {
 }
 
 // Dump prints the entire contents of the bbolt database for debugging purposes.
+// Note: Values are printed in their encrypted form.
 func (s *BboltStore) Dump() error {
 	err := s.DB.View(func(tx *bbolt.Tx) error {
 		return tx.ForEach(func(bucketName []byte, b *bbolt.Bucket) error {
