@@ -235,8 +235,10 @@ func (c *client) registerUser() {
 
 			context := "LECHUGA-BONIATO-AUTH-" + email
 
+			salt := "Leviathan-" + email
+
 			// Derive the encryption key using the password and email.
-			key, err := crypto.DeriveKey(password, email, context)
+			key, err := crypto.DeriveKey(password, salt, context)
 			if err != nil {
 				fmt.Println("Error deriving encryption key:", err)
 				return
