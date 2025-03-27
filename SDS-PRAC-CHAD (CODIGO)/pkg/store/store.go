@@ -31,6 +31,8 @@ type Store interface {
 
 	// Dump imprime todo el contenido de la base de datos para depuración de errores.
 	Dump() error
+
+	CountEntries() (int, error)
 }
 
 // NewStore permite instanciar diferentes tipos de Store

@@ -11,11 +11,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"prac/pkg/api"
+	"prac/pkg/backup"
 	"prac/pkg/crypto"
 	"prac/pkg/store"
 
@@ -209,6 +211,10 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res = s.updateData(req, providedAccessToken)
 	case api.ActionLogout:
 		res = s.logoutUser(req, providedRefreshToken)
+	case api.ActionBackup:
+		res = s.backupDatabase()
+	case api.ActionRestore:
+		res = s.restoreDatabase(req)
 	default:
 		res = api.Response{Success: false, Message: "Unknown action"}
 	}
@@ -491,4 +497,59 @@ func (s *serverImpl) isAccessTokenValid(userUUID, tokenString string) bool {
 		return false
 	}
 	return true
+}
+
+// Funcion para hacer los backups
+func (s *serverImpl) backupDatabase() api.Response {
+	backupDir := "backups"
+	dbPath := "data/server.db"
+
+	if err := backup.BackupDatabase(dbPath, backupDir); err != nil {
+		return api.Response{Success: false, Message: fmt.Sprintf("Error creating backup: %v", err)}
+	}
+
+	return api.Response{Success: true, Message: "Backup created successfully"}
+}
+
+// Funcion para recuperar los backups
+func (s *serverImpl) restoreDatabase(req api.Request) api.Response {
+	if req.Data == "" {
+		return api.Response{Success: false, Message: "Missing backup file name"}
+	}
+
+	backupFile := filepath.Join("backups", req.Data)
+	dbPath := "data/server.db"
+
+	// Check if the backup file exists.
+	if _, err := os.Stat(backupFile); os.IsNotExist(err) {
+		return api.Response{Success: false, Message: "Backup file not found"}
+	}
+
+	// Close the current database connection.
+	if err := s.db.Close(); err != nil {
+		return api.Response{Success: false, Message: "Error closing database: " + err.Error()}
+	}
+
+	// Replace the current database file with the backup file.
+	if err := os.Rename(backupFile, dbPath); err != nil {
+		return api.Response{Success: false, Message: "Error restoring backup: " + err.Error()}
+	}
+
+	// Reopen the database.
+	newDB, err := store.NewStore("bbolt", dbPath)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error reopening database: " + err.Error()}
+	}
+	s.db = newDB
+
+	// Count the number of lines (entries) in the database.
+	lineCount, err := s.db.CountEntries()
+	if err != nil {
+		return api.Response{Success: false, Message: "Error counting database entries: " + err.Error()}
+	}
+
+	return api.Response{
+		Success: true,
+		Message: fmt.Sprintf("Backup restored successfully. Total entries restored: %d", lineCount),
+	}
 }

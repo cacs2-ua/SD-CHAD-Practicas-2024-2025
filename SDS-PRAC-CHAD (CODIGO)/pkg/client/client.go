@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -110,6 +111,8 @@ func (c *client) runLoop() {
 				"Update data",
 				"Logout",
 				"Exit",
+				"Create Backup",
+				"Restore Backup",
 			}
 		}
 
@@ -142,6 +145,11 @@ func (c *client) runLoop() {
 				// Exit option.
 				c.log.Println("Exiting client...")
 				return
+			case 5:
+				// Create a backup of the database file.
+				c.createBackup()
+			case 6:
+				c.restoreBackup()
 			}
 		}
 
@@ -493,7 +501,14 @@ func (c *client) sendRequest(req api.Request) (api.Response, string, string) {
 			request.Header.Set("X-Refresh-Token", "Bearer "+c.refreshToken)
 		}
 	}
-	clientHttp := &http.Client{}
+
+	// Create an HTTP client with TLS verification disabled.
+	clientHttp := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
 	resp, err := clientHttp.Do(request)
 	if err != nil {
 		fmt.Println("Error contacting server:", err)
@@ -508,4 +523,57 @@ func (c *client) sendRequest(req api.Request) (api.Response, string, string) {
 	accessToken := resp.Header.Get("Authorization")
 	refreshToken := resp.Header.Get("X-Refresh-Token")
 	return res, accessToken, refreshToken
+}
+
+// Create Backup
+func (c *client) createBackup() {
+	ui.ClearScreen()
+	fmt.Println("** Create Backup **")
+
+	res, _, _ := c.sendRequest(api.Request{
+		Action: api.ActionBackup,
+	})
+
+	fmt.Println("Success:", res.Success)
+	fmt.Println("Message:", res.Message)
+}
+
+func (c *client) restoreBackup() {
+	ui.ClearScreen()
+	fmt.Println("** Restore Backup **")
+
+	// List available backups.
+	files, err := os.ReadDir("backups")
+	if err != nil {
+		fmt.Println("Error reading backups directory:", err)
+		return
+	}
+
+	if len(files) == 0 {
+		fmt.Println("No backups available.")
+		return
+	}
+
+	fmt.Println("Available backups:")
+	for i, file := range files {
+		fmt.Printf("%d. %s\n", i+1, file.Name())
+	}
+
+	choice := ui.ReadInt("Select a backup to restore")
+	if choice < 1 || choice > len(files) {
+		fmt.Println("Invalid choice.")
+		return
+	}
+
+	selectedBackup := files[choice-1].Name()
+
+	// Send the restore request to the server.
+	res, _, _ := c.sendRequest(api.Request{
+		Action: api.ActionRestore,
+		Data:   selectedBackup,
+	})
+
+	// Display the result.
+	fmt.Println("Success:", res.Success)
+	fmt.Println("Message:", res.Message)
 }

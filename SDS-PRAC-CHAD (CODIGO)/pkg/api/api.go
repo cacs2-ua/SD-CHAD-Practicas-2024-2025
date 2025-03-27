@@ -7,6 +7,8 @@ const (
 	ActionUpdateData = "updateData"
 	ActionLogout     = "logout"
 	ActionRefresh    = "refresh" // new action for token refresh
+	ActionBackup     = "backup"  // new action for database backup
+	ActionRestore    = "restore" // new action for database restore
 )
 
 // Request structure for communication between server and client.
