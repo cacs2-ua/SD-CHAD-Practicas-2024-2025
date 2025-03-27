@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -24,6 +26,8 @@ import (
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/sha3"
+	"google.golang.org/api/drive/v2"
+	"google.golang.org/api/option"
 )
 
 // Define bucket names (all names are now prefixed with "cheese")
@@ -503,46 +507,79 @@ func (s *serverImpl) isAccessTokenValid(userUUID, tokenString string) bool {
 func (s *serverImpl) backupDatabase() api.Response {
 	backupDir := "backups"
 	dbPath := "data/server.db"
+	driveFolderID := "1_gUO5uP3qjNxz9g9P_wy2AQNYGAW-lqf" // ID de la carpeta de Google Drive
 
-	if err := backup.BackupDatabase(dbPath, backupDir); err != nil {
+	if err := backup.BackupDatabase(dbPath, backupDir, driveFolderID); err != nil {
 		return api.Response{Success: false, Message: fmt.Sprintf("Error creating backup: %v", err)}
 	}
 
 	return api.Response{Success: true, Message: "Backup created successfully"}
 }
 
+// DownloadBackupFromGoogleDrive downloads a backup file from Google Drive.
+func DownloadBackupFromGoogleDrive(fileID string, destinationPath string, credentialsPath string) error {
+	ctx := context.Background()
+
+	// Authenticate using the credentials JSON file.
+	srv, err := drive.NewService(ctx, option.WithCredentialsFile(credentialsPath))
+	if err != nil {
+		return fmt.Errorf("error creating Google Drive service: %v", err)
+	}
+
+	// Get the file from Google Drive.
+	resp, err := srv.Files.Get(fileID).Download()
+	if err != nil {
+		return fmt.Errorf("error downloading file from Google Drive: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Create the destination file.
+	destFile, err := os.Create(destinationPath)
+	if err != nil {
+		return fmt.Errorf("error creating destination file: %v", err)
+	}
+	defer destFile.Close()
+
+	// Copy the file content to the destination file.
+	if _, err := io.Copy(destFile, resp.Body); err != nil {
+		return fmt.Errorf("error saving file to destination: %v", err)
+	}
+
+	return nil
+}
+
 // Funcion para recuperar los backups
 func (s *serverImpl) restoreDatabase(req api.Request) api.Response {
 	if req.Data == "" {
-		return api.Response{Success: false, Message: "Missing backup file name"}
+		return api.Response{Success: false, Message: "Missing backup file ID"}
 	}
 
-	backupFile := filepath.Join("backups", req.Data)
+	backupFile := filepath.Join("backups", "restored_backup.db")
 	dbPath := "data/server.db"
 
-	// Check if the backup file exists.
-	if _, err := os.Stat(backupFile); os.IsNotExist(err) {
-		return api.Response{Success: false, Message: "Backup file not found"}
+	// Descargar el archivo desde Google Drive.
+	if err := backup.DownloadBackupFromGoogleDrive(req.Data, backupFile); err != nil {
+		return api.Response{Success: false, Message: fmt.Sprintf("Error downloading backup: %v", err)}
 	}
 
-	// Close the current database connection.
+	// Cerrar la conexión actual a la base de datos.
 	if err := s.db.Close(); err != nil {
 		return api.Response{Success: false, Message: "Error closing database: " + err.Error()}
 	}
 
-	// Replace the current database file with the backup file.
+	// Reemplazar el archivo de la base de datos con el backup descargado.
 	if err := os.Rename(backupFile, dbPath); err != nil {
 		return api.Response{Success: false, Message: "Error restoring backup: " + err.Error()}
 	}
 
-	// Reopen the database.
+	// Reabrir la base de datos.
 	newDB, err := store.NewStore("bbolt", dbPath)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error reopening database: " + err.Error()}
 	}
 	s.db = newDB
 
-	// Count the number of lines (entries) in the database.
+	// Contar las entradas restauradas.
 	lineCount, err := s.db.CountEntries()
 	if err != nil {
 		return api.Response{Success: false, Message: "Error counting database entries: " + err.Error()}
