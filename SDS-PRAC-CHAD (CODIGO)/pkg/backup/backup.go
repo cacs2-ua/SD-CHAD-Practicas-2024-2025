@@ -13,9 +13,12 @@ import (
 )
 
 const credentialsPath = "keys/credentials.json" // Ruta al archivo JSON con las credenciales
+const driveFolderID = "11gN_pH9h0RJkyQ19mZEtJLxVbEyH6ZFt"
+const backupDir = "backups"
+const dbPath = "data/server.db"
 
 // BackupDatabase creates a backup of the database file and uploads it to Google Drive.
-func BackupDatabase(dbPath string, backupDir string, driveFolderID string) error {
+func BackupDatabase() error {
 	// Ensure the backup directory exists.
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
 		return fmt.Errorf("error creating backup directory: %v", err)

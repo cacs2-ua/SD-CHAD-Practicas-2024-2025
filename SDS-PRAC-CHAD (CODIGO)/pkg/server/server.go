@@ -21,6 +21,7 @@ import (
 	"prac/pkg/api"
 	"prac/pkg/backup"
 	"prac/pkg/crypto"
+	"prac/pkg/logging"
 	"prac/pkg/store"
 
 	"github.com/golang-jwt/jwt"
@@ -388,6 +389,9 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 	if err := s.db.Put("cheese_refresh", keyUUID, hashedRefresh); err != nil {
 		return api.Response{Success: false, Message: "Error saving refresh token"}, "", ""
 	}
+
+	logging.Log("User " + username + " logged in successfully")
+
 	return api.Response{Success: true, Message: "Login successful", Data: username}, accessToken, refreshToken
 }
 
@@ -505,11 +509,7 @@ func (s *serverImpl) isAccessTokenValid(userUUID, tokenString string) bool {
 
 // Funcion para hacer los backups
 func (s *serverImpl) backupDatabase() api.Response {
-	backupDir := "backups"
-	dbPath := "data/server.db"
-	driveFolderID := "1_gUO5uP3qjNxz9g9P_wy2AQNYGAW-lqf" // ID de la carpeta de Google Drive
-
-	if err := backup.BackupDatabase(dbPath, backupDir, driveFolderID); err != nil {
+	if err := backup.BackupDatabase(); err != nil {
 		return api.Response{Success: false, Message: fmt.Sprintf("Error creating backup: %v", err)}
 	}
 

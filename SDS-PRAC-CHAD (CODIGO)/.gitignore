@@ -23,3 +23,10 @@ data/server.db
 # Ignorar archivos de entorno y logs
 .env
 *.log
+
+# Ignorar archivo credenciales Google
+/keys/credentials.json
+
+# Ignorar carpeta de logs y backups
+/logs/
+/backups/
