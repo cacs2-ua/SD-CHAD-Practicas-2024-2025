@@ -1,27 +1,34 @@
 package server
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"prac/pkg/api"
+	"prac/pkg/backup"
 	"prac/pkg/crypto"
+	"prac/pkg/logging"
 	"prac/pkg/store"
 
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/sha3"
+	"google.golang.org/api/drive/v2"
+	"google.golang.org/api/option"
 )
 
 // Define bucket names (all names are now prefixed with "cheese")
@@ -209,6 +216,10 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res = s.updateData(req, providedAccessToken)
 	case api.ActionLogout:
 		res = s.logoutUser(req, providedRefreshToken)
+	case api.ActionBackup:
+		res = s.backupDatabase()
+	case api.ActionRestore:
+		res = s.restoreDatabase(req)
 	default:
 		res = api.Response{Success: false, Message: "Unknown action"}
 	}
@@ -378,6 +389,9 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 	if err := s.db.Put("cheese_refresh", keyUUID, hashedRefresh); err != nil {
 		return api.Response{Success: false, Message: "Error saving refresh token"}, "", ""
 	}
+
+	logging.Log("User " + username + " logged in successfully")
+
 	return api.Response{Success: true, Message: "Login successful", Data: username}, accessToken, refreshToken
 }
 
@@ -491,4 +505,88 @@ func (s *serverImpl) isAccessTokenValid(userUUID, tokenString string) bool {
 		return false
 	}
 	return true
+}
+
+// Funcion para hacer los backups
+func (s *serverImpl) backupDatabase() api.Response {
+	if err := backup.BackupDatabase(); err != nil {
+		return api.Response{Success: false, Message: fmt.Sprintf("Error creating backup: %v", err)}
+	}
+
+	return api.Response{Success: true, Message: "Backup created successfully"}
+}
+
+// DownloadBackupFromGoogleDrive downloads a backup file from Google Drive.
+func DownloadBackupFromGoogleDrive(fileID string, destinationPath string, credentialsPath string) error {
+	ctx := context.Background()
+
+	// Authenticate using the credentials JSON file.
+	srv, err := drive.NewService(ctx, option.WithCredentialsFile(credentialsPath))
+	if err != nil {
+		return fmt.Errorf("error creating Google Drive service: %v", err)
+	}
+
+	// Get the file from Google Drive.
+	resp, err := srv.Files.Get(fileID).Download()
+	if err != nil {
+		return fmt.Errorf("error downloading file from Google Drive: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Create the destination file.
+	destFile, err := os.Create(destinationPath)
+	if err != nil {
+		return fmt.Errorf("error creating destination file: %v", err)
+	}
+	defer destFile.Close()
+
+	// Copy the file content to the destination file.
+	if _, err := io.Copy(destFile, resp.Body); err != nil {
+		return fmt.Errorf("error saving file to destination: %v", err)
+	}
+
+	return nil
+}
+
+// Funcion para recuperar los backups
+func (s *serverImpl) restoreDatabase(req api.Request) api.Response {
+	if req.Data == "" {
+		return api.Response{Success: false, Message: "Missing backup file ID"}
+	}
+
+	backupFile := filepath.Join("backups", "restored_backup.db")
+	dbPath := "data/server.db"
+
+	// Descargar el archivo desde Google Drive.
+	if err := backup.DownloadBackupFromGoogleDrive(req.Data, backupFile); err != nil {
+		return api.Response{Success: false, Message: fmt.Sprintf("Error downloading backup: %v", err)}
+	}
+
+	// Cerrar la conexión actual a la base de datos.
+	if err := s.db.Close(); err != nil {
+		return api.Response{Success: false, Message: "Error closing database: " + err.Error()}
+	}
+
+	// Reemplazar el archivo de la base de datos con el backup descargado.
+	if err := os.Rename(backupFile, dbPath); err != nil {
+		return api.Response{Success: false, Message: "Error restoring backup: " + err.Error()}
+	}
+
+	// Reabrir la base de datos.
+	newDB, err := store.NewStore("bbolt", dbPath)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error reopening database: " + err.Error()}
+	}
+	s.db = newDB
+
+	// Contar las entradas restauradas.
+	lineCount, err := s.db.CountEntries()
+	if err != nil {
+		return api.Response{Success: false, Message: "Error counting database entries: " + err.Error()}
+	}
+
+	return api.Response{
+		Success: true,
+		Message: fmt.Sprintf("Backup restored successfully. Total entries restored: %d", lineCount),
+	}
 }

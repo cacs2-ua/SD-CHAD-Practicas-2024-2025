@@ -2,6 +2,8 @@ package client
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -16,6 +18,9 @@ import (
 	"prac/pkg/api"
 	"prac/pkg/crypto"
 	"prac/pkg/ui"
+
+	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/option"
 )
 
 // client is an internal structure that controls the session state (user, tokens)
@@ -110,6 +115,8 @@ func (c *client) runLoop() {
 				"Update data",
 				"Logout",
 				"Exit",
+				"Create Backup",
+				"Restore Backup",
 			}
 		}
 
@@ -142,6 +149,11 @@ func (c *client) runLoop() {
 				// Exit option.
 				c.log.Println("Exiting client...")
 				return
+			case 5:
+				// Create a backup of the database file.
+				c.createBackup()
+			case 6:
+				c.restoreBackupFromDrive()
 			}
 		}
 
@@ -493,7 +505,14 @@ func (c *client) sendRequest(req api.Request) (api.Response, string, string) {
 			request.Header.Set("X-Refresh-Token", "Bearer "+c.refreshToken)
 		}
 	}
-	clientHttp := &http.Client{}
+
+	// Create an HTTP client with TLS verification disabled.
+	clientHttp := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
 	resp, err := clientHttp.Do(request)
 	if err != nil {
 		fmt.Println("Error contacting server:", err)
@@ -508,4 +527,93 @@ func (c *client) sendRequest(req api.Request) (api.Response, string, string) {
 	accessToken := resp.Header.Get("Authorization")
 	refreshToken := resp.Header.Get("X-Refresh-Token")
 	return res, accessToken, refreshToken
+}
+
+// Create Backup
+func (c *client) createBackup() {
+	ui.ClearScreen()
+	fmt.Println("** Create Backup **")
+
+	res, _, _ := c.sendRequest(api.Request{
+		Action: api.ActionBackup,
+	})
+
+	fmt.Println("Success:", res.Success)
+	fmt.Println("Message:", res.Message)
+}
+
+// listBackupsFromGoogleDrive lists all backup files in the specified Google Drive folder.
+func listBackupsFromGoogleDrive(folderID string, credentialsPath string) (map[string]string, error) {
+	ctx := context.Background()
+
+	// Authenticate using the credentials JSON file.
+	srv, err := drive.NewService(ctx, option.WithCredentialsFile(credentialsPath))
+	if err != nil {
+		return nil, fmt.Errorf("error creating Google Drive service: %v", err)
+	}
+
+	// Query files in the folder.
+	query := fmt.Sprintf("'%s' in parents and trashed = false", folderID)
+	// filepath: /pkg/client/client.go
+	fileList, err := srv.Files.List().Q(query).Fields("files(id, name)").Do()
+	if err != nil {
+		return nil, fmt.Errorf("error listing files in Google Drive: %v", err)
+	}
+
+	// Cambiar el acceso a los archivos
+	files := make(map[string]string)
+	for _, file := range fileList.Files {
+		files[file.Name] = file.Id
+	}
+
+	return files, nil
+}
+
+// restoreBackupFromDrive allows the user to select and restore a backup from Google Drive.
+func (c *client) restoreBackupFromDrive() {
+	ui.ClearScreen()
+	fmt.Println("** Restore Backup from Google Drive **")
+
+	credentialsPath := "keys/credentials.json"           // Cambia esto por la ruta real.
+	driveFolderID := "1_gUO5uP3qjNxz9g9P_wy2AQNYGAW-lqf" // ID de la carpeta de Google Drive.
+
+	// List available backups.
+	files, err := listBackupsFromGoogleDrive(driveFolderID, credentialsPath)
+	if err != nil {
+		fmt.Println("Error listing backups:", err)
+		return
+	}
+
+	if len(files) == 0 {
+		fmt.Println("No backups available in Google Drive.")
+		return
+	}
+
+	fmt.Println("Available backups:")
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	for i, name := range names {
+		fmt.Printf("%d. %s\n", i+1, name)
+	}
+
+	choice := ui.ReadInt("Select a backup to restore")
+	if choice < 1 || choice > len(names) {
+		fmt.Println("Invalid choice.")
+		return
+	}
+
+	selectedName := names[choice-1]
+	selectedID := files[selectedName]
+
+	// Send the restore request to the server.
+	res, _, _ := c.sendRequest(api.Request{
+		Action: api.ActionRestore,
+		Data:   selectedID,
+	})
+
+	// Display the result.
+	fmt.Println("Success:", res.Success)
+	fmt.Println("Message:", res.Message)
 }

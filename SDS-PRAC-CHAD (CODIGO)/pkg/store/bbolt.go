@@ -177,3 +177,17 @@ func (s *BboltStore) Dump() error {
 	}
 	return nil
 }
+
+// CountEntries cuenta el número total de entradas en todas las buckets de la base de datos.
+func (s *BboltStore) CountEntries() (int, error) {
+	count := 0
+	err := s.DB.View(func(tx *bbolt.Tx) error {
+		return tx.ForEach(func(name []byte, b *bbolt.Bucket) error {
+			return b.ForEach(func(k, v []byte) error {
+				count++
+				return nil
+			})
+		})
+	})
+	return count, err
+}
