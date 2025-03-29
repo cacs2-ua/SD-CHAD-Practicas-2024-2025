@@ -672,7 +672,6 @@ func (c *client) messagesMenu() {
 
 // conversationView handles a chat conversation with the specified recipient.
 func (c *client) conversationView(recipient string) {
-	// Loop to continuously display chat history and allow sending messages.
 	for {
 		// Retrieve chat history from the server.
 		res, _, _ := c.sendRequest(api.Request{
@@ -680,6 +679,9 @@ func (c *client) conversationView(recipient string) {
 			Username: recipient,
 			Sender:   c.currentUser,
 		})
+		fmt.Println("---------------------------------")
+		fmt.Println("  Chat History")
+		fmt.Println("---------------------------------")
 		if res.Success {
 			var chatMessages []struct {
 				Sender string `json:"sender"`
@@ -688,14 +690,12 @@ func (c *client) conversationView(recipient string) {
 			if err := json.Unmarshal([]byte(res.Data), &chatMessages); err != nil {
 				fmt.Println("Error decoding chat messages:", err)
 			} else {
-				// For each message, decrypt and display it.
 				for _, msg := range chatMessages {
 					var senderPub *rsa.PublicKey
-					// Load the sender's public key based on identity.
 					if msg.Sender == c.currentUser {
 						pub, err := functionalities.LoadPublicKey(c.currentUser)
 						if err != nil {
-							fmt.Printf("%s: [Error loading your public key]\n", msg.Sender)
+							fmt.Printf("You: [Error loading your public key]\n")
 							continue
 						}
 						senderPub = pub
@@ -708,57 +708,57 @@ func (c *client) conversationView(recipient string) {
 						senderPub = pub
 					}
 
-					// Unmarshal the stored packet into an EncryptedPacket.
 					var packet functionalities.EncryptedPacket
-					// Unquote the packet string first (to remove extra quotes)
 					unquotedPacket, err := strconv.Unquote(msg.Packet)
 					if err != nil {
-						// If unquoting fails, use the original string
 						unquotedPacket = msg.Packet
 					}
 					if err := json.Unmarshal([]byte(unquotedPacket), &packet); err != nil {
 						fmt.Printf("%s: [Error decoding packet]\n", msg.Sender)
 						continue
 					}
-					// Load your private key (always use your private key for decryption).
 					priv, err := functionalities.LoadPrivateKey(c.currentUser)
 					if err != nil {
 						fmt.Printf("%s: [Error loading your private key]\n", msg.Sender)
 						continue
 					}
-					// Determine if you are the sender.
 					isSender := msg.Sender == c.currentUser
 					decrypted, err := functionalities.DecryptEncryptedPacket(&packet, priv, senderPub, isSender)
 					if err != nil {
 						fmt.Printf("%s: [Error decrypting message]\n", msg.Sender)
 						continue
 					}
-					fmt.Printf("%s: %s\n", msg.Sender, string(decrypted))
+					displayName := msg.Sender
+					if msg.Sender == c.currentUser {
+						displayName = "You"
+					}
+					fmt.Printf("%s: %s\n", displayName, string(decrypted))
 				}
 			}
 		} else {
 			fmt.Println("Error retrieving chat history:", res.Message)
 		}
 
-		// Prompt for new message.
 		fmt.Println("---------------------------------")
 		newMsg := ui.ReadInput("Type your message (or type EXIT to go back)")
 		if strings.ToUpper(newMsg) == "EXIT" {
 			break
 		}
-		// Load recipient's public key.
+		// Prevent sending empty messages.
+		if strings.TrimSpace(newMsg) == "" {
+			fmt.Println("Cannot send an empty message")
+			continue
+		}
 		recipientPub, err := functionalities.LoadPublicKey(recipient)
 		if err != nil {
 			fmt.Println("Error loading recipient public key:", err)
 			continue
 		}
-		// Load sender's private key.
 		senderPriv, err := functionalities.LoadPrivateKey(c.currentUser)
 		if err != nil {
 			fmt.Println("Error loading your private key:", err)
 			continue
 		}
-		// Create encrypted packet.
 		packet, err := functionalities.CreateEncryptedPacket([]byte(newMsg), recipientPub, senderPriv)
 		if err != nil {
 			fmt.Println("Error creating encrypted packet:", err)
@@ -769,7 +769,6 @@ func (c *client) conversationView(recipient string) {
 			fmt.Println("Error encoding packet:", err)
 			continue
 		}
-		// Send message request with Sender field.
 		sendRes, _, _ := c.sendRequest(api.Request{
 			Action:   api.ActionSendMessage,
 			Username: recipient,

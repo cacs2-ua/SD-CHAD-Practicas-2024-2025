@@ -164,6 +164,19 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("error opening database: %v", err)
 	}
+	// Create the messages bucket if it does not exist
+	bs, ok := db.(*store.BboltStore)
+	if !ok {
+		return fmt.Errorf("error asserting store to *BboltStore")
+	}
+	err = bs.DB.Update(func(tx *bbolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists(store.BucketName(bucketMessages))
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("error creating messages bucket: %v", err)
+	}
+
 	srv := &serverImpl{
 		db:  db,
 		log: log.New(os.Stdout, "[srv] ", log.LstdFlags),
