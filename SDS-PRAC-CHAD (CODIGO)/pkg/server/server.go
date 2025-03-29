@@ -164,7 +164,7 @@ func Run() error {
 
 	mux := http.NewServeMux()
 	mux.Handle("/api", http.HandlerFunc(srv.apiHandler))
-	err = http.ListenAndServeTLS(":8080", "certs/server.crt", "certs/server.key", mux)
+	err = http.ListenAndServeTLS(":9200", "certs/server.crt", "certs/server.key", mux)
 	return err
 }
 

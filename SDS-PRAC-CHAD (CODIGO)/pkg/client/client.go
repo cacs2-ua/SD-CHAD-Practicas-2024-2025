@@ -3,7 +3,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -489,7 +488,7 @@ func (c *client) logoutUser() {
 // It is used for all actions.
 func (c *client) sendRequest(req api.Request) (api.Response, string, string) {
 	jsonData, _ := json.Marshal(req)
-	request, err := http.NewRequest("POST", "https://localhost:8080/api", bytes.NewBuffer(jsonData))
+	request, err := http.NewRequest("POST", "https://localhost:9200/api", bytes.NewBuffer(jsonData))
 	if err != nil {
 		fmt.Println("Error creating request:", err)
 		return api.Response{Success: false, Message: "Request error"}, "", ""
@@ -506,12 +505,7 @@ func (c *client) sendRequest(req api.Request) (api.Response, string, string) {
 		}
 	}
 
-	// Create an HTTP client with TLS verification disabled.
-	clientHttp := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
+	clientHttp := &http.Client{}
 
 	resp, err := clientHttp.Do(request)
 	if err != nil {
