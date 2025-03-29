@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -618,7 +620,9 @@ func (c *client) restoreBackupFromDrive() {
 
 func (c *client) messagesMenu() {
 	ui.ClearScreen()
-	fmt.Println("** Secure Messages **")
+	fmt.Println("---------------------------------")
+	fmt.Println("         MESSAGES")
+	fmt.Println("---------------------------------")
 
 	// Request the list of usernames from the server.
 	res, _, _ := c.sendRequest(api.Request{
@@ -629,70 +633,151 @@ func (c *client) messagesMenu() {
 		return
 	}
 
-	// Assume the Data field contains a JSON-encoded array of usernames.
 	var usernames []string
 	if err := json.Unmarshal([]byte(res.Data), &usernames); err != nil {
 		fmt.Println("Error decoding usernames:", err)
 		return
 	}
 
-	if len(usernames) == 0 {
+	// Filter out the current user.
+	var availableUsers []string
+	for _, user := range usernames {
+		if user != c.currentUser {
+			availableUsers = append(availableUsers, user)
+		}
+	}
+	if len(availableUsers) == 0 {
 		fmt.Println("No users available.")
 		return
 	}
 
-	fmt.Println("Available users:")
-	for i, name := range usernames {
+	fmt.Println("Available Users:")
+	for i, name := range availableUsers {
 		fmt.Printf("%d. %s\n", i+1, name)
 	}
-
-	choice := ui.ReadInt("Select a user to message")
-	if choice < 1 || choice > len(usernames) {
+	choice := ui.ReadInt("Select the number of the user you want to chat with")
+	if choice < 1 || choice > len(availableUsers) {
 		fmt.Println("Invalid choice.")
 		return
 	}
-	recipient := usernames[choice-1]
-	fmt.Printf("Opening conversation with %s...\n", recipient)
+	recipient := availableUsers[choice-1]
+	ui.ClearScreen()
+	fmt.Println("---------------------------------")
+	fmt.Printf("  Conversation with %s\n", recipient)
+	fmt.Println("---------------------------------")
 
-	// Load recipient's public key.
-	recipientPub, err := functionalities.LoadPublicKey(recipient)
-	if err != nil {
-		fmt.Println("Error loading recipient public key:", err)
-		return
-	}
+	// Start conversation view.
+	c.conversationView(recipient)
+}
 
-	// Load sender's private key (current user).
-	senderPriv, err := functionalities.LoadPrivateKey(c.currentUser)
-	if err != nil {
-		fmt.Println("Error loading sender private key:", err)
-		return
-	}
-
-	// Loop for sending messages.
+// conversationView handles a chat conversation with the specified recipient.
+func (c *client) conversationView(recipient string) {
+	// Loop to continuously display chat history and allow sending messages.
 	for {
-		msg := ui.ReadInput("Enter message (or type EXIT to go back)")
-		if strings.ToUpper(msg) == "EXIT" {
+		// Retrieve chat history from the server.
+		res, _, _ := c.sendRequest(api.Request{
+			Action:   api.ActionGetMessages,
+			Username: recipient,
+			Sender:   c.currentUser,
+		})
+		if res.Success {
+			var chatMessages []struct {
+				Sender string `json:"sender"`
+				Packet string `json:"packet"`
+			}
+			if err := json.Unmarshal([]byte(res.Data), &chatMessages); err != nil {
+				fmt.Println("Error decoding chat messages:", err)
+			} else {
+				// For each message, decrypt and display it.
+				for _, msg := range chatMessages {
+					var senderPub *rsa.PublicKey
+					// Load the sender's public key based on identity.
+					if msg.Sender == c.currentUser {
+						pub, err := functionalities.LoadPublicKey(c.currentUser)
+						if err != nil {
+							fmt.Printf("%s: [Error loading your public key]\n", msg.Sender)
+							continue
+						}
+						senderPub = pub
+					} else {
+						pub, err := functionalities.LoadPublicKey(recipient)
+						if err != nil {
+							fmt.Printf("%s: [Error loading %s's public key]\n", msg.Sender, recipient)
+							continue
+						}
+						senderPub = pub
+					}
+
+					// Unmarshal the stored packet into an EncryptedPacket.
+					var packet functionalities.EncryptedPacket
+					// Unquote the packet string first (to remove extra quotes)
+					unquotedPacket, err := strconv.Unquote(msg.Packet)
+					if err != nil {
+						// If unquoting fails, use the original string
+						unquotedPacket = msg.Packet
+					}
+					if err := json.Unmarshal([]byte(unquotedPacket), &packet); err != nil {
+						fmt.Printf("%s: [Error decoding packet]\n", msg.Sender)
+						continue
+					}
+					// Load your private key (always use your private key for decryption).
+					priv, err := functionalities.LoadPrivateKey(c.currentUser)
+					if err != nil {
+						fmt.Printf("%s: [Error loading your private key]\n", msg.Sender)
+						continue
+					}
+					// Determine if you are the sender.
+					isSender := msg.Sender == c.currentUser
+					decrypted, err := functionalities.DecryptEncryptedPacket(&packet, priv, senderPub, isSender)
+					if err != nil {
+						fmt.Printf("%s: [Error decrypting message]\n", msg.Sender)
+						continue
+					}
+					fmt.Printf("%s: %s\n", msg.Sender, string(decrypted))
+				}
+			}
+		} else {
+			fmt.Println("Error retrieving chat history:", res.Message)
+		}
+
+		// Prompt for new message.
+		fmt.Println("---------------------------------")
+		newMsg := ui.ReadInput("Type your message (or type EXIT to go back)")
+		if strings.ToUpper(newMsg) == "EXIT" {
 			break
 		}
-		// Create the encrypted packet.
-		packet, err := functionalities.CreateEncryptedPacket([]byte(msg), recipientPub, senderPriv)
+		// Load recipient's public key.
+		recipientPub, err := functionalities.LoadPublicKey(recipient)
+		if err != nil {
+			fmt.Println("Error loading recipient public key:", err)
+			continue
+		}
+		// Load sender's private key.
+		senderPriv, err := functionalities.LoadPrivateKey(c.currentUser)
+		if err != nil {
+			fmt.Println("Error loading your private key:", err)
+			continue
+		}
+		// Create encrypted packet.
+		packet, err := functionalities.CreateEncryptedPacket([]byte(newMsg), recipientPub, senderPriv)
 		if err != nil {
 			fmt.Println("Error creating encrypted packet:", err)
 			continue
 		}
-		// Encode the packet as JSON.
 		packetJSON, err := json.Marshal(packet)
 		if err != nil {
 			fmt.Println("Error encoding packet:", err)
 			continue
 		}
-		// Send the packet to the server with ActionSendMessage.
+		// Send message request with Sender field.
 		sendRes, _, _ := c.sendRequest(api.Request{
 			Action:   api.ActionSendMessage,
 			Username: recipient,
-			Sender:   c.currentUser, // <-- Added Sender field
+			Sender:   c.currentUser,
 			Data:     string(packetJSON),
 		})
-		fmt.Println("Send Message - Success:", sendRes.Success, "| Message:", sendRes.Message)
+		if !sendRes.Success {
+			fmt.Println("Error sending message:", sendRes.Message)
+		}
 	}
 }

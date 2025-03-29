@@ -33,6 +33,11 @@ import (
 	"google.golang.org/api/option"
 )
 
+type ChatMessage struct {
+	Sender string `json:"sender"`
+	Packet string `json:"packet"` // JSON-encoded EncryptedPacket
+}
+
 // Global bucket names defined as plain strings to avoid double hashing.
 var bucketAuthUUID = "cheese_auth_uuid"
 var bucketAuthPassword = "cheese_auth_password"
@@ -629,7 +634,18 @@ func (s *serverImpl) handleSendMessage(req api.Request) api.Response {
 	}
 	timestamp := time.Now().UnixNano()
 	messageKey := fmt.Sprintf("%s:%d", convID, timestamp)
-	if err := s.db.Put(bucketMessages, []byte(messageKey), []byte(req.Data)); err != nil {
+
+	// Wrap the incoming packet (req.Data) with the sender identity.
+	chatMsg := ChatMessage{
+		Sender: sender,
+		Packet: req.Data,
+	}
+	chatMsgBytes, err := json.Marshal(chatMsg)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error encoding chat message: " + err.Error()}
+	}
+
+	if err := s.db.Put(bucketMessages, []byte(messageKey), chatMsgBytes); err != nil {
 		return api.Response{Success: false, Message: "Error storing message: " + err.Error()}
 	}
 	return api.Response{Success: true, Message: "Message stored"}
@@ -648,7 +664,7 @@ func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 	} else {
 		convID = partner + ":" + sender
 	}
-	var messages []string
+	var chatMessages []ChatMessage
 	bs, ok := s.db.(*store.BboltStore)
 	if !ok {
 		return api.Response{Success: false, Message: "Store type assertion failed"}
@@ -662,14 +678,24 @@ func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 		c := b.Cursor()
 		prefix := []byte(convID + ":")
 		for k, v := c.Seek(prefix); k != nil && strings.HasPrefix(string(k), convID+":"); k, v = c.Next() {
-			messages = append(messages, string(v))
+			var chatMsg ChatMessage
+			// v is stored encrypted by EncryptServer, so first decrypt with DecryptServer:
+			decryptedVal, err := crypto.DecryptServer(v)
+			if err != nil {
+				continue // skip if decryption fails
+			}
+			// Now unmarshal the decrypted value into ChatMessage.
+			if err := json.Unmarshal(decryptedVal, &chatMsg); err != nil {
+				continue
+			}
+			chatMessages = append(chatMessages, chatMsg)
 		}
 		return nil
 	})
 	if err != nil {
 		return api.Response{Success: false, Message: "Error retrieving messages: " + err.Error()}
 	}
-	data, err := json.Marshal(messages)
+	data, err := json.Marshal(chatMessages)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error encoding messages"}
 	}

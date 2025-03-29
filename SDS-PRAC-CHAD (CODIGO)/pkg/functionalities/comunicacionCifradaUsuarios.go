@@ -1,4 +1,3 @@
-// File: functionalities/comunicacionCifradaUsuarios.go
 package functionalities
 
 import (
@@ -30,11 +29,14 @@ const (
 
 // EncryptedPacket defines the structure that holds the encrypted symmetric key,
 // the encrypted message, the digital signature and a timestamp.
+// We now include two encrypted versions of the symmetric key:
+// one for the recipient and one for the sender.
 type EncryptedPacket struct {
-	EncryptedSymKey string // base64 encoded encrypted symmetric key
-	EncryptedMsg    string // base64 encoded AES-GCM ciphertext (nonce prepended)
-	Signature       string // base64 encoded digital signature
-	Timestamp       int64  // Unix timestamp
+	EncryptedSymKey       string `json:"encryptedSymKey"`       // base64 encoded encrypted symmetric key for recipient
+	EncryptedSymKeySender string `json:"encryptedSymKeySender"` // base64 encoded encrypted symmetric key for sender
+	EncryptedMsg          string `json:"encryptedMsg"`          // base64 encoded AES-GCM ciphertext (nonce prepended)
+	Signature             string `json:"signature"`             // base64 encoded digital signature
+	Timestamp             int64  `json:"timestamp"`             // Unix timestamp
 }
 
 // GenerateKeyPair generates a new RSA key pair for the given user and saves them to disk.
@@ -172,9 +174,9 @@ func generateRandomBytes(length int) ([]byte, error) {
 
 // CreateEncryptedPacket performs the following:
 // 1. Generates a random symmetric key.
-// 2. Encrypts the message using AES-GCM (via the existing seccrypto.Encrypt).
-// 3. Encrypts the symmetric key with the recipient's public key.
-// 4. Signs the original message using the sender's private key.
+// 2. Encrypts the message using AES-GCM (via seccrypto.Encrypt).
+// 3. Encrypts the symmetric key with the recipient's public key AND with the sender's public key.
+// 4. Signs the concatenation of the timestamp and the encrypted message using the sender's private key.
 // 5. Returns an EncryptedPacket.
 func CreateEncryptedPacket(message []byte, recipientPub *rsa.PublicKey, senderPriv *rsa.PrivateKey) (*EncryptedPacket, error) {
 	// Generate a random symmetric key (32 bytes for AES-256)
@@ -190,15 +192,22 @@ func CreateEncryptedPacket(message []byte, recipientPub *rsa.PublicKey, senderPr
 	}
 
 	// Encrypt the symmetric key with recipient's public key.
-	encryptedSymKey, err := EncryptWithPublicKey(symKey, recipientPub)
+	encryptedSymKeyRecipient, err := EncryptWithPublicKey(symKey, recipientPub)
 	if err != nil {
-		return nil, fmt.Errorf("error encrypting symmetric key: %v", err)
+		return nil, fmt.Errorf("error encrypting symmetric key for recipient: %v", err)
+	}
+
+	// Encrypt the symmetric key with sender's own public key.
+	senderPub := &senderPriv.PublicKey
+	encryptedSymKeySender, err := EncryptWithPublicKey(symKey, senderPub)
+	if err != nil {
+		return nil, fmt.Errorf("error encrypting symmetric key for sender: %v", err)
 	}
 
 	// Create a timestamp.
 	timestamp := time.Now().Unix()
 
-	// Prepare a data blob for signing (e.g., the concatenation of the timestamp and the encrypted message).
+	// Prepare a data blob for signing (concatenation of timestamp and encryptedMsg).
 	signData := append([]byte(fmt.Sprintf("%d", timestamp)), encryptedMsg...)
 
 	// Sign the data.
@@ -208,20 +217,29 @@ func CreateEncryptedPacket(message []byte, recipientPub *rsa.PublicKey, senderPr
 	}
 
 	packet := &EncryptedPacket{
-		EncryptedSymKey: base64.StdEncoding.EncodeToString(encryptedSymKey),
-		EncryptedMsg:    base64.StdEncoding.EncodeToString(encryptedMsg),
-		Signature:       base64.StdEncoding.EncodeToString(signature),
-		Timestamp:       timestamp,
+		EncryptedSymKey:       base64.StdEncoding.EncodeToString(encryptedSymKeyRecipient),
+		EncryptedSymKeySender: base64.StdEncoding.EncodeToString(encryptedSymKeySender),
+		EncryptedMsg:          base64.StdEncoding.EncodeToString(encryptedMsg),
+		Signature:             base64.StdEncoding.EncodeToString(signature),
+		Timestamp:             timestamp,
 	}
 	return packet, nil
 }
 
 // DecryptEncryptedPacket decrypts an EncryptedPacket.
-// It decrypts the symmetric key using the recipient's private key, then decrypts the message.
-// It also verifies the digital signature using the sender's public key.
-func DecryptEncryptedPacket(packet *EncryptedPacket, recipientPriv *rsa.PrivateKey, senderPub *rsa.PublicKey) ([]byte, error) {
+// The caller must indicate whether they are the sender.
+// If isSender is true, the function uses the sender-specific encrypted symmetric key.
+// Otherwise, it uses the recipient's encrypted symmetric key.
+func DecryptEncryptedPacket(packet *EncryptedPacket, recipientPriv *rsa.PrivateKey, senderPub *rsa.PublicKey, isSender bool) ([]byte, error) {
+	var encSymKeyB64 string
+	if isSender {
+		encSymKeyB64 = packet.EncryptedSymKeySender
+	} else {
+		encSymKeyB64 = packet.EncryptedSymKey
+	}
+
 	// Decode the base64 encoded fields.
-	encSymKey, err := base64.StdEncoding.DecodeString(packet.EncryptedSymKey)
+	encSymKey, err := base64.StdEncoding.DecodeString(encSymKeyB64)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding encrypted symmetric key: %v", err)
 	}
