@@ -621,7 +621,7 @@ func (c *client) restoreBackupFromDrive() {
 func (c *client) messagesMenu() {
 	ui.ClearScreen()
 	fmt.Println("---------------------------------")
-	fmt.Println("         MESSAGES")
+	fmt.Println("      CHAT WITH OTHER USERS")
 	fmt.Println("---------------------------------")
 
 	// Request the list of usernames from the server.
@@ -679,9 +679,6 @@ func (c *client) conversationView(recipient string) {
 			Username: recipient,
 			Sender:   c.currentUser,
 		})
-		fmt.Println("---------------------------------")
-		fmt.Println("  Chat History")
-		fmt.Println("---------------------------------")
 		if res.Success {
 			var chatMessages []struct {
 				Sender string `json:"sender"`
