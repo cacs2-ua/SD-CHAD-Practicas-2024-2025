@@ -16,6 +16,7 @@ import (
 
 	"prac/pkg/api"
 	"prac/pkg/crypto"
+	"prac/pkg/functionalities"
 	"prac/pkg/ui"
 
 	"google.golang.org/api/drive/v3"
@@ -116,6 +117,7 @@ func (c *client) runLoop() {
 				"Exit",
 				"Create Backup",
 				"Restore Backup",
+				"Messages",
 			}
 		}
 
@@ -153,6 +155,8 @@ func (c *client) runLoop() {
 				c.createBackup()
 			case 6:
 				c.restoreBackupFromDrive()
+			case 7:
+				c.messagesMenu()
 			}
 		}
 
@@ -610,4 +614,85 @@ func (c *client) restoreBackupFromDrive() {
 	// Display the result.
 	fmt.Println("Success:", res.Success)
 	fmt.Println("Message:", res.Message)
+}
+
+func (c *client) messagesMenu() {
+	ui.ClearScreen()
+	fmt.Println("** Secure Messages **")
+
+	// Request the list of usernames from the server.
+	res, _, _ := c.sendRequest(api.Request{
+		Action: api.ActionGetUsernames,
+	})
+	if !res.Success {
+		fmt.Println("Error fetching usernames:", res.Message)
+		return
+	}
+
+	// Assume the Data field contains a JSON-encoded array of usernames.
+	var usernames []string
+	if err := json.Unmarshal([]byte(res.Data), &usernames); err != nil {
+		fmt.Println("Error decoding usernames:", err)
+		return
+	}
+
+	if len(usernames) == 0 {
+		fmt.Println("No users available.")
+		return
+	}
+
+	fmt.Println("Available users:")
+	for i, name := range usernames {
+		fmt.Printf("%d. %s\n", i+1, name)
+	}
+
+	choice := ui.ReadInt("Select a user to message")
+	if choice < 1 || choice > len(usernames) {
+		fmt.Println("Invalid choice.")
+		return
+	}
+	recipient := usernames[choice-1]
+	fmt.Printf("Opening conversation with %s...\n", recipient)
+
+	// Load recipient's public key.
+	recipientPub, err := functionalities.LoadPublicKey(recipient)
+	if err != nil {
+		fmt.Println("Error loading recipient public key:", err)
+		return
+	}
+
+	// Load sender's private key (current user).
+	senderPriv, err := functionalities.LoadPrivateKey(c.currentUser)
+	if err != nil {
+		fmt.Println("Error loading sender private key:", err)
+		return
+	}
+
+	// Loop for sending messages.
+	for {
+		msg := ui.ReadInput("Enter message (or type EXIT to go back)")
+		if strings.ToUpper(msg) == "EXIT" {
+			break
+		}
+		// Create the encrypted packet.
+		packet, err := functionalities.CreateEncryptedPacket([]byte(msg), recipientPub, senderPriv)
+		if err != nil {
+			fmt.Println("Error creating encrypted packet:", err)
+			continue
+		}
+		// Encode the packet as JSON.
+		packetJSON, err := json.Marshal(packet)
+		if err != nil {
+			fmt.Println("Error encoding packet:", err)
+			continue
+		}
+		// Send the packet to the server with ActionSendMessage.
+		sendRes, _, _ := c.sendRequest(api.Request{
+			Action:   api.ActionSendMessage,
+			Username: recipient,
+			Sender:   c.currentUser, // <-- Added Sender field
+			Data:     string(packetJSON),
+		})
+		fmt.Println("Send Message - Success:", sendRes.Success, "| Message:", sendRes.Message)
+	}
 }
