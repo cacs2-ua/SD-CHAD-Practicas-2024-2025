@@ -359,7 +359,7 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error generating key pair for messaging: " + err.Error()}
 	}
 
-	if err := functionalities.GenerateAuthKeyPair(s.db, req.Username, req.Email); err != nil {
+	if err := functionalities.GenerateAuthKeyPair(s.db, req.Username, userUUID); err != nil {
 		return api.Response{Success: false, Message: "Error generating auth key pair: " + err.Error()}
 	}
 
