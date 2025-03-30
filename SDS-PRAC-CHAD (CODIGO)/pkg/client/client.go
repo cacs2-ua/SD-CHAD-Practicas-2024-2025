@@ -3,7 +3,10 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -17,7 +20,7 @@ import (
 	"time"
 
 	"prac/pkg/api"
-	"prac/pkg/crypto"
+	pcrypto "prac/pkg/crypto"
 	"prac/pkg/functionalities"
 	"prac/pkg/ui"
 
@@ -105,9 +108,11 @@ func (c *client) runLoop() {
 		var options []string
 		if c.currentUser == "" {
 			// Not logged in: Register, Login, Exit
+			// Not logged in: Register, Login, Login with public key, Exit
 			options = []string{
 				"Register user",
 				"Login",
+				"Login with public key",
 				"Exit",
 			}
 		} else {
@@ -129,16 +134,20 @@ func (c *client) runLoop() {
 		// Map the chosen option based on login state.
 		if c.currentUser == "" {
 			// Not logged in.
+			// Not logged in.
 			switch choice {
 			case 1:
 				c.registerUser()
 			case 2:
 				c.loginUser()
 			case 3:
+				c.loginWithPublicKey()
+			case 4:
 				// Exit option.
 				c.log.Println("Exiting client...")
 				return
 			}
+
 		} else {
 			// Logged in.
 			switch choice {
@@ -255,7 +264,7 @@ func (c *client) registerUser() {
 			salt := "Leviathan-" + email
 
 			// Derive the encryption key using the password and email.
-			key, err := crypto.DeriveKey(password, salt, context)
+			key, err := pcrypto.DeriveKey(password, salt, context)
 			if err != nil {
 				fmt.Println("Error deriving encryption key:", err)
 				return
@@ -332,7 +341,7 @@ func (c *client) loginUser() {
 
 		context := "LECHUGA-BONIATO-AUTH-" + email
 		// Derive the encryption key using the password and email.
-		key, err := crypto.DeriveKey(password, salt, context)
+		key, err := pcrypto.DeriveKey(password, salt, context)
 		if err != nil {
 			fmt.Println("Error deriving encryption key:", err)
 			return
@@ -348,6 +357,87 @@ func (c *client) loginUser() {
 		// Store the plaintext password temporarily.
 		c.plaintextPassword = password
 		fmt.Println("Login successful. Tokens and encryption key saved.")
+	}
+}
+
+func (c *client) loginWithPublicKey() {
+	ui.ClearScreen()
+	fmt.Println("** Public Key Login **")
+
+	email := ui.ReadInput("Email")
+	if email == "" {
+		fmt.Println("Email cannot be empty")
+		return
+	}
+	if !isValidEmail(email) {
+		fmt.Println("Invalid email format")
+		return
+	}
+
+	// Send the request to initiate public key login.
+	res, _, _ := c.sendRequest(api.Request{
+		Action: api.ActionPublicKeyLogin,
+		Email:  email,
+	})
+	if !res.Success {
+		fmt.Println("Error initiating public key login:", res.Message)
+		return
+	}
+	// Parse the challenge and username from the response.
+	var dataObj map[string]string
+	if err := json.Unmarshal([]byte(res.Data), &dataObj); err != nil {
+		fmt.Println("Error parsing challenge data:", err)
+		return
+	}
+	challenge, ok1 := dataObj["challenge"]
+	username, ok2 := dataObj["username"]
+	if !ok1 || !ok2 {
+		fmt.Println("Invalid challenge data received")
+		return
+	}
+
+	// Load the auth private key from keys/users-auth/<username>/private.pem.
+	authPrivKey, err := functionalities.LoadAuthPrivateKey(username)
+	if err != nil {
+		fmt.Println("Error loading auth private key:", err)
+		return
+	}
+
+	// Sign the challenge using RSA PKCS1v15 with SHA256.
+	hash := sha256.Sum256([]byte(challenge))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, authPrivKey, crypto.SHA256, hash[:])
+	if err != nil {
+		fmt.Println("Error signing challenge:", err)
+		return
+	}
+	signatureB64 := base64.StdEncoding.EncodeToString(signature)
+
+	// Send the signature back to the server.
+	resResp, accessToken, refreshToken := c.sendRequest(api.Request{
+		Action: api.ActionPublicKeyLoginResponse,
+		Email:  email,
+		Data:   signatureB64,
+	})
+	fmt.Println("Success:", resResp.Success)
+	fmt.Println("Message:", resResp.Message)
+	if resResp.Success {
+		c.currentUser = username
+		if strings.HasPrefix(accessToken, "Bearer ") {
+			accessToken = accessToken[7:]
+		}
+		if strings.HasPrefix(refreshToken, "Bearer ") {
+			refreshToken = refreshToken[7:]
+		}
+		c.authToken = accessToken
+		c.refreshToken = refreshToken
+
+		expiry, err := parseTokenExpiry(c.authToken)
+		if err != nil {
+			fmt.Println("Error parsing token expiry:", err)
+		} else {
+			c.accessTokenExpiry = expiry
+		}
+		fmt.Println("Public key login successful. Tokens saved.")
 	}
 }
 
@@ -414,7 +504,7 @@ func (c *client) fetchData() {
 				return
 			}
 			// Decrypt the data using the encryption key.
-			decryptedData, err := crypto.Decrypt(encryptedData, c.encryptionKey)
+			decryptedData, err := pcrypto.Decrypt(encryptedData, c.encryptionKey)
 			if err != nil {
 				fmt.Println("Error decrypting data:", err)
 				return
@@ -441,7 +531,7 @@ func (c *client) updateData() {
 	newData := ui.ReadInput("Enter the content to store")
 
 	// Encrypt the data using the encryption key.
-	encryptedData, err := crypto.Encrypt([]byte(newData), c.encryptionKey)
+	encryptedData, err := pcrypto.Encrypt([]byte(newData), c.encryptionKey)
 	if err != nil {
 		fmt.Println("Error encrypting data:", err)
 		return

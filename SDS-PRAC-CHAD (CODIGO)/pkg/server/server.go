@@ -229,6 +229,30 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res = s.registerUser(req)
 	case api.ActionLogin:
 		res, newAccessToken, newRefreshToken = s.loginUser(req)
+	case api.ActionPublicKeyLogin:
+		// Initiate public key login; req.Email must be provided
+		challenge, username, err := functionalities.InitiatePublicKeyLogin(s.db, req.Email)
+		if err != nil {
+			res = api.Response{Success: false, Message: err.Error()}
+		} else {
+			// Return a JSON object with the challenge and username
+			dataObj := map[string]string{
+				"challenge": challenge,
+				"username":  username,
+			}
+			dataBytes, _ := json.Marshal(dataObj)
+			res = api.Response{Success: true, Message: "Challenge generated", Data: string(dataBytes)}
+		}
+	case api.ActionPublicKeyLoginResponse:
+		// Verify public key login response; req.Email and req.Data (signature) are required
+		accessToken, refreshToken, err := functionalities.VerifyPublicKeyLogin(s.db, req.Email, req.Data)
+		if err != nil {
+			res = api.Response{Success: false, Message: err.Error()}
+		} else {
+			res = api.Response{Success: true, Message: "Public key login successful"}
+			newAccessToken = accessToken
+			newRefreshToken = refreshToken
+		}
 	case api.ActionRefresh:
 		res, newAccessToken, newRefreshToken = s.refreshToken(req, providedRefreshToken)
 	case api.ActionFetchData:
@@ -330,6 +354,10 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	// Generate RSA key pair for messaging
 	if err := functionalities.GenerateKeyPair(req.Username); err != nil {
 		return api.Response{Success: false, Message: "Error generating key pair for messaging: " + err.Error()}
+	}
+
+	if err := functionalities.GenerateAuthKeyPair(s.db, req.Username, req.Email); err != nil {
+		return api.Response{Success: false, Message: "Error generating auth key pair: " + err.Error()}
 	}
 
 	return api.Response{Success: true, Message: "User registered"}
