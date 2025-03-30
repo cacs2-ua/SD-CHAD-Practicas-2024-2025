@@ -264,7 +264,7 @@ func (c *client) registerUser() {
 			salt := "Leviathan-" + email
 
 			// Derive the encryption key using the password and email.
-			key, err := pcrypto.DeriveKey(password, salt, context)
+			key, err := pcrypto.DeriveKey(email, salt, context)
 			if err != nil {
 				fmt.Println("Error deriving encryption key:", err)
 				return
@@ -341,7 +341,7 @@ func (c *client) loginUser() {
 
 		context := "LECHUGA-BONIATO-AUTH-" + email
 		// Derive the encryption key using the password and email.
-		key, err := pcrypto.DeriveKey(password, salt, context)
+		key, err := pcrypto.DeriveKey(email, salt, context)
 		if err != nil {
 			fmt.Println("Error deriving encryption key:", err)
 			return
