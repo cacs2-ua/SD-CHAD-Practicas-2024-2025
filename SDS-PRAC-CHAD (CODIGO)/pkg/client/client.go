@@ -3,7 +3,10 @@ package client
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -12,11 +15,13 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"prac/pkg/api"
-	"prac/pkg/crypto"
+	pcrypto "prac/pkg/crypto"
+	"prac/pkg/functionalities"
 	"prac/pkg/ui"
 
 	"google.golang.org/api/drive/v3"
@@ -103,9 +108,11 @@ func (c *client) runLoop() {
 		var options []string
 		if c.currentUser == "" {
 			// Not logged in: Register, Login, Exit
+			// Not logged in: Register, Login, Login with public key, Exit
 			options = []string{
 				"Register user",
 				"Login",
+				"Login with public key",
 				"Exit",
 			}
 		} else {
@@ -117,6 +124,7 @@ func (c *client) runLoop() {
 				"Exit",
 				"Create Backup",
 				"Restore Backup",
+				"Messages",
 			}
 		}
 
@@ -126,16 +134,20 @@ func (c *client) runLoop() {
 		// Map the chosen option based on login state.
 		if c.currentUser == "" {
 			// Not logged in.
+			// Not logged in.
 			switch choice {
 			case 1:
 				c.registerUser()
 			case 2:
 				c.loginUser()
 			case 3:
+				c.loginWithPublicKey()
+			case 4:
 				// Exit option.
 				c.log.Println("Exiting client...")
 				return
 			}
+
 		} else {
 			// Logged in.
 			switch choice {
@@ -154,6 +166,8 @@ func (c *client) runLoop() {
 				c.createBackup()
 			case 6:
 				c.restoreBackupFromDrive()
+			case 7:
+				c.messagesMenu()
 			}
 		}
 
@@ -250,7 +264,7 @@ func (c *client) registerUser() {
 			salt := "Leviathan-" + email
 
 			// Derive the encryption key using the password and email.
-			key, err := crypto.DeriveKey(password, salt, context)
+			key, err := pcrypto.DeriveKey(email, salt, context)
 			if err != nil {
 				fmt.Println("Error deriving encryption key:", err)
 				return
@@ -327,7 +341,7 @@ func (c *client) loginUser() {
 
 		context := "LECHUGA-BONIATO-AUTH-" + email
 		// Derive the encryption key using the password and email.
-		key, err := crypto.DeriveKey(password, salt, context)
+		key, err := pcrypto.DeriveKey(email, salt, context)
 		if err != nil {
 			fmt.Println("Error deriving encryption key:", err)
 			return
@@ -343,6 +357,97 @@ func (c *client) loginUser() {
 		// Store the plaintext password temporarily.
 		c.plaintextPassword = password
 		fmt.Println("Login successful. Tokens and encryption key saved.")
+	}
+}
+
+func (c *client) loginWithPublicKey() {
+	ui.ClearScreen()
+	fmt.Println("** Public Key Login **")
+
+	email := ui.ReadInput("Email")
+	if email == "" {
+		fmt.Println("Email cannot be empty")
+		return
+	}
+	if !isValidEmail(email) {
+		fmt.Println("Invalid email format")
+		return
+	}
+
+	// Send the request to initiate public key login.
+	res, _, _ := c.sendRequest(api.Request{
+		Action: api.ActionPublicKeyLogin,
+		Email:  email,
+	})
+	if !res.Success {
+		fmt.Println("Error initiating public key login:", res.Message)
+		return
+	}
+	// Parse the challenge and username from the response.
+	var dataObj map[string]string
+	if err := json.Unmarshal([]byte(res.Data), &dataObj); err != nil {
+		fmt.Println("Error parsing challenge data:", err)
+		return
+	}
+	challenge, ok1 := dataObj["challenge"]
+	username, ok2 := dataObj["username"]
+	if !ok1 || !ok2 {
+		fmt.Println("Invalid challenge data received")
+		return
+	}
+
+	// Load the auth private key from keys/users-auth/<username>/private.pem.
+	authPrivKey, err := functionalities.LoadAuthPrivateKey(username)
+	if err != nil {
+		fmt.Println("Error loading auth private key:", err)
+		return
+	}
+
+	// Sign the challenge using RSA PKCS1v15 with SHA256.
+	hash := sha256.Sum256([]byte(challenge))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, authPrivKey, crypto.SHA256, hash[:])
+	if err != nil {
+		fmt.Println("Error signing challenge:", err)
+		return
+	}
+	signatureB64 := base64.StdEncoding.EncodeToString(signature)
+
+	// Send the signature back to the server.
+	resResp, accessToken, refreshToken := c.sendRequest(api.Request{
+		Action: api.ActionPublicKeyLoginResponse,
+		Email:  email,
+		Data:   signatureB64,
+	})
+	fmt.Println("Success:", resResp.Success)
+	fmt.Println("Message:", resResp.Message)
+	if resResp.Success {
+		c.currentUser = username
+		if strings.HasPrefix(accessToken, "Bearer ") {
+			accessToken = accessToken[7:]
+		}
+		if strings.HasPrefix(refreshToken, "Bearer ") {
+			refreshToken = refreshToken[7:]
+		}
+		c.authToken = accessToken
+		c.refreshToken = refreshToken
+
+		// Derive the encryption key solely from the email.
+		salt := "Leviathan-" + email
+		context := "LECHUGA-BONIATO-AUTH-" + email
+		key, err := pcrypto.DeriveKey(email, salt, context)
+		if err != nil {
+			fmt.Println("Error deriving encryption key:", err)
+			return
+		}
+		c.encryptionKey = key
+
+		expiry, err := parseTokenExpiry(c.authToken)
+		if err != nil {
+			fmt.Println("Error parsing token expiry:", err)
+		} else {
+			c.accessTokenExpiry = expiry
+		}
+		fmt.Println("Public key login successful. Tokens saved.")
 	}
 }
 
@@ -409,7 +514,7 @@ func (c *client) fetchData() {
 				return
 			}
 			// Decrypt the data using the encryption key.
-			decryptedData, err := crypto.Decrypt(encryptedData, c.encryptionKey)
+			decryptedData, err := pcrypto.Decrypt(encryptedData, c.encryptionKey)
 			if err != nil {
 				fmt.Println("Error decrypting data:", err)
 				return
@@ -436,7 +541,7 @@ func (c *client) updateData() {
 	newData := ui.ReadInput("Enter the content to store")
 
 	// Encrypt the data using the encryption key.
-	encryptedData, err := crypto.Encrypt([]byte(newData), c.encryptionKey)
+	encryptedData, err := pcrypto.Encrypt([]byte(newData), c.encryptionKey)
 	if err != nil {
 		fmt.Println("Error encrypting data:", err)
 		return
@@ -489,7 +594,7 @@ func (c *client) logoutUser() {
 // It is used for all actions.
 func (c *client) sendRequest(req api.Request) (api.Response, string, string) {
 	jsonData, _ := json.Marshal(req)
-	request, err := http.NewRequest("POST", "https://localhost:8080/api", bytes.NewBuffer(jsonData))
+	request, err := http.NewRequest("POST", "https://localhost:9200/api", bytes.NewBuffer(jsonData))
 	if err != nil {
 		fmt.Println("Error creating request:", err)
 		return api.Response{Success: false, Message: "Request error"}, "", ""
@@ -506,12 +611,7 @@ func (c *client) sendRequest(req api.Request) (api.Response, string, string) {
 		}
 	}
 
-	// Create an HTTP client with TLS verification disabled.
-	clientHttp := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
+	clientHttp := &http.Client{}
 
 	resp, err := clientHttp.Do(request)
 	if err != nil {
@@ -616,4 +716,164 @@ func (c *client) restoreBackupFromDrive() {
 	// Display the result.
 	fmt.Println("Success:", res.Success)
 	fmt.Println("Message:", res.Message)
+}
+
+func (c *client) messagesMenu() {
+	ui.ClearScreen()
+	fmt.Println("---------------------------------")
+	fmt.Println("      CHAT WITH OTHER USERS")
+	fmt.Println("---------------------------------")
+
+	// Request the list of usernames from the server.
+	res, _, _ := c.sendRequest(api.Request{
+		Action: api.ActionGetUsernames,
+	})
+	if !res.Success {
+		fmt.Println("Error fetching usernames:", res.Message)
+		return
+	}
+
+	var usernames []string
+	if err := json.Unmarshal([]byte(res.Data), &usernames); err != nil {
+		fmt.Println("Error decoding usernames:", err)
+		return
+	}
+
+	// Filter out the current user.
+	var availableUsers []string
+	for _, user := range usernames {
+		if user != c.currentUser {
+			availableUsers = append(availableUsers, user)
+		}
+	}
+	if len(availableUsers) == 0 {
+		fmt.Println("No users available.")
+		return
+	}
+
+	fmt.Println("Available Users:")
+	for i, name := range availableUsers {
+		fmt.Printf("%d. %s\n", i+1, name)
+	}
+	choice := ui.ReadInt("Select the number of the user you want to chat with")
+	if choice < 1 || choice > len(availableUsers) {
+		fmt.Println("Invalid choice.")
+		return
+	}
+	recipient := availableUsers[choice-1]
+	ui.ClearScreen()
+	fmt.Println("---------------------------------")
+	fmt.Printf("  Conversation with %s\n", recipient)
+	fmt.Println("---------------------------------")
+
+	// Start conversation view.
+	c.conversationView(recipient)
+}
+
+// conversationView handles a chat conversation with the specified recipient.
+func (c *client) conversationView(recipient string) {
+	for {
+		// Retrieve chat history from the server.
+		res, _, _ := c.sendRequest(api.Request{
+			Action:   api.ActionGetMessages,
+			Username: recipient,
+			Sender:   c.currentUser,
+		})
+		if res.Success {
+			var chatMessages []struct {
+				Sender string `json:"sender"`
+				Packet string `json:"packet"`
+			}
+			if err := json.Unmarshal([]byte(res.Data), &chatMessages); err != nil {
+				fmt.Println("Error decoding chat messages:", err)
+			} else {
+				for _, msg := range chatMessages {
+					var senderPub *rsa.PublicKey
+					if msg.Sender == c.currentUser {
+						pub, err := functionalities.LoadPublicKey(c.currentUser)
+						if err != nil {
+							fmt.Printf("You: [Error loading your public key]\n")
+							continue
+						}
+						senderPub = pub
+					} else {
+						pub, err := functionalities.LoadPublicKey(recipient)
+						if err != nil {
+							fmt.Printf("%s: [Error loading %s's public key]\n", msg.Sender, recipient)
+							continue
+						}
+						senderPub = pub
+					}
+
+					var packet functionalities.EncryptedPacket
+					unquotedPacket, err := strconv.Unquote(msg.Packet)
+					if err != nil {
+						unquotedPacket = msg.Packet
+					}
+					if err := json.Unmarshal([]byte(unquotedPacket), &packet); err != nil {
+						fmt.Printf("%s: [Error decoding packet]\n", msg.Sender)
+						continue
+					}
+					priv, err := functionalities.LoadPrivateKey(c.currentUser)
+					if err != nil {
+						fmt.Printf("%s: [Error loading your private key]\n", msg.Sender)
+						continue
+					}
+					isSender := msg.Sender == c.currentUser
+					decrypted, err := functionalities.DecryptEncryptedPacket(&packet, priv, senderPub, isSender)
+					if err != nil {
+						fmt.Printf("%s: [Error decrypting message]\n", msg.Sender)
+						continue
+					}
+					displayName := msg.Sender
+					if msg.Sender == c.currentUser {
+						displayName = "You"
+					}
+					fmt.Printf("%s: %s\n", displayName, string(decrypted))
+				}
+			}
+		} else {
+			fmt.Println("Error retrieving chat history:", res.Message)
+		}
+
+		fmt.Println("---------------------------------")
+		newMsg := ui.ReadInput("Type your message (or type EXIT to go back)")
+		if strings.ToUpper(newMsg) == "EXIT" {
+			break
+		}
+		// Prevent sending empty messages.
+		if strings.TrimSpace(newMsg) == "" {
+			fmt.Println("Cannot send an empty message")
+			continue
+		}
+		recipientPub, err := functionalities.LoadPublicKey(recipient)
+		if err != nil {
+			fmt.Println("Error loading recipient public key:", err)
+			continue
+		}
+		senderPriv, err := functionalities.LoadPrivateKey(c.currentUser)
+		if err != nil {
+			fmt.Println("Error loading your private key:", err)
+			continue
+		}
+		packet, err := functionalities.CreateEncryptedPacket([]byte(newMsg), recipientPub, senderPriv)
+		if err != nil {
+			fmt.Println("Error creating encrypted packet:", err)
+			continue
+		}
+		packetJSON, err := json.Marshal(packet)
+		if err != nil {
+			fmt.Println("Error encoding packet:", err)
+			continue
+		}
+		sendRes, _, _ := c.sendRequest(api.Request{
+			Action:   api.ActionSendMessage,
+			Username: recipient,
+			Sender:   c.currentUser,
+			Data:     string(packetJSON),
+		})
+		if !sendRes.Success {
+			fmt.Println("Error sending message:", sendRes.Message)
+		}
+	}
 }

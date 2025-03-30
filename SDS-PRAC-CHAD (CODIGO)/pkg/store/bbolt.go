@@ -19,9 +19,9 @@ func HashBytes(data []byte) []byte {
 }
 
 // shouldHash returns true if the given namespace should have its key hashed.
-// For the "usernames" bucket, we do not hash the key.
+// For the "usernames", "messages" and "cheese_auth_cypher_uuid" buckets, we do NOT hash the key.
 func shouldHash(namespace string) bool {
-	return namespace != "usernames"
+	return (namespace != "usernames" && namespace != "messages" && namespace != "cheese_auth_cypher_uuid")
 }
 
 // getKey returns the key to be used in the bucket. If shouldHash is true, the key is hashed.
@@ -33,7 +33,7 @@ func getKey(namespace string, key []byte) []byte {
 }
 
 /*
-	Implementation of the Store interface using BoltDB (bbolt version)
+   Implementation of the Store interface using BoltDB (bbolt version)
 */
 
 // BboltStore holds the instance of the bbolt database.
@@ -58,11 +58,11 @@ func (s *BboltStore) Put(namespace string, key, value []byte) error {
 		return fmt.Errorf("error encrypting value: %v", err)
 	}
 	actualKey := getKey(namespace, key)
-	hashedNamespace := HashBytes([]byte(namespace))
+	bucketName := BucketName(namespace)
 	return s.DB.Update(func(tx *bbolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists(hashedNamespace)
+		b, err := tx.CreateBucketIfNotExists(bucketName)
 		if err != nil {
-			return fmt.Errorf("error creating/opening bucket '%s': %v", hex.EncodeToString(hashedNamespace), err)
+			return fmt.Errorf("error creating/opening bucket '%s': %v", hex.EncodeToString(bucketName), err)
 		}
 		return b.Put(actualKey, encryptedValue)
 	})
@@ -72,12 +72,12 @@ func (s *BboltStore) Put(namespace string, key, value []byte) error {
 // The retrieved data is decrypted using the server key.
 func (s *BboltStore) Get(namespace string, key []byte) ([]byte, error) {
 	actualKey := getKey(namespace, key)
-	hashedNamespace := HashBytes([]byte(namespace))
+	bucketName := BucketName(namespace)
 	var encryptedVal []byte
 	err := s.DB.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket(hashedNamespace)
+		b := tx.Bucket(bucketName)
 		if b == nil {
-			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(hashedNamespace))
+			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(bucketName))
 		}
 		encryptedVal = b.Get(actualKey)
 		if encryptedVal == nil {
@@ -98,11 +98,11 @@ func (s *BboltStore) Get(namespace string, key []byte) ([]byte, error) {
 // Delete removes the key from the bucket (namespace).
 func (s *BboltStore) Delete(namespace string, key []byte) error {
 	actualKey := getKey(namespace, key)
-	hashedNamespace := HashBytes([]byte(namespace))
+	bucketName := BucketName(namespace)
 	return s.DB.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket(hashedNamespace)
+		b := tx.Bucket(bucketName)
 		if b == nil {
-			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(hashedNamespace))
+			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(bucketName))
 		}
 		return b.Delete(actualKey)
 	})
@@ -110,12 +110,12 @@ func (s *BboltStore) Delete(namespace string, key []byte) error {
 
 // ListKeys returns all keys in the bucket (namespace).
 func (s *BboltStore) ListKeys(namespace string) ([][]byte, error) {
-	hashedNamespace := HashBytes([]byte(namespace))
+	bucketName := BucketName(namespace)
 	var keys [][]byte
 	err := s.DB.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket(hashedNamespace)
+		b := tx.Bucket(bucketName)
 		if b == nil {
-			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(hashedNamespace))
+			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(bucketName))
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
@@ -129,9 +129,10 @@ func (s *BboltStore) ListKeys(namespace string) ([][]byte, error) {
 }
 
 // KeysByPrefix returns keys that start with 'prefix' in the bucket (namespace).
-// Note: Because keys are hashed, prefix searches may not be useful.
+// Note: Because keys are hashed for some buckets, prefix searches may not be useful.
+// For buckets that do not hash keys, this function works as expected.
 func (s *BboltStore) KeysByPrefix(namespace string, prefix []byte) ([][]byte, error) {
-	hashedNamespace := HashBytes([]byte(namespace))
+	bucketName := BucketName(namespace)
 	var actualPrefix []byte
 	if shouldHash(namespace) {
 		actualPrefix = HashBytes(prefix)
@@ -140,9 +141,9 @@ func (s *BboltStore) KeysByPrefix(namespace string, prefix []byte) ([][]byte, er
 	}
 	var matchedKeys [][]byte
 	err := s.DB.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket(hashedNamespace)
+		b := tx.Bucket(bucketName)
 		if b == nil {
-			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(hashedNamespace))
+			return fmt.Errorf("bucket not found: %s", hex.EncodeToString(bucketName))
 		}
 		c := b.Cursor()
 		for k, _ := c.Seek(actualPrefix); k != nil && bytes.HasPrefix(k, actualPrefix); k, _ = c.Next() {
@@ -178,7 +179,7 @@ func (s *BboltStore) Dump() error {
 	return nil
 }
 
-// CountEntries cuenta el número total de entradas en todas las buckets de la base de datos.
+// CountEntries counts the total number of entries in all buckets of the database.
 func (s *BboltStore) CountEntries() (int, error) {
 	count := 0
 	err := s.DB.View(func(tx *bbolt.Tx) error {
@@ -190,4 +191,9 @@ func (s *BboltStore) CountEntries() (int, error) {
 		})
 	})
 	return count, err
+}
+
+// BucketName returns the bucket name used in the database for the given namespace.
+func BucketName(namespace string) []byte {
+	return HashBytes([]byte(namespace))
 }
