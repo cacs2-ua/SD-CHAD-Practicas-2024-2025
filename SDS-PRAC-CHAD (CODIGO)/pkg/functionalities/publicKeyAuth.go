@@ -199,6 +199,12 @@ func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (st
 	if err != nil {
 		return "", "", fmt.Errorf("error generating refresh token: %v", err)
 	}
+	// Save the refresh token in the database so that auto-refresh works
+	keyUUID := store.HashBytes([]byte(userUUID))
+	hashedRefresh := store.HashBytes([]byte(refreshToken))
+	if err := db.Put("cheese_refresh", keyUUID, hashedRefresh); err != nil {
+		return "", "", fmt.Errorf("error saving refresh token: %v", err)
+	}
 	return accessToken, refreshToken, nil
 }
 

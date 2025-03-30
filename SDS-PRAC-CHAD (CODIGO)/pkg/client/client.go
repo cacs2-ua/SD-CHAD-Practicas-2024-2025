@@ -431,6 +431,16 @@ func (c *client) loginWithPublicKey() {
 		c.authToken = accessToken
 		c.refreshToken = refreshToken
 
+		// Derive the encryption key solely from the email.
+		salt := "Leviathan-" + email
+		context := "LECHUGA-BONIATO-AUTH-" + email
+		key, err := pcrypto.DeriveKey(email, salt, context)
+		if err != nil {
+			fmt.Println("Error deriving encryption key:", err)
+			return
+		}
+		c.encryptionKey = key
+
 		expiry, err := parseTokenExpiry(c.authToken)
 		if err != nil {
 			fmt.Println("Error parsing token expiry:", err)
