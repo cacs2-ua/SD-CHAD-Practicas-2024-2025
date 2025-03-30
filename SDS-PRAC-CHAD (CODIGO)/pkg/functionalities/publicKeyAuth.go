@@ -19,6 +19,7 @@ import (
 
 	pcrypto "prac/pkg/crypto"
 	"prac/pkg/store"
+	"prac/pkg/token"
 )
 
 // AuthKeyData holds the auth key information.
@@ -189,12 +190,12 @@ func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (st
 	if err != nil {
 		return "", "", fmt.Errorf("error decrypting user UUID: %v", err)
 	}
-	// Generate tokens (here using placeholder functions; replace with actual token generation as needed)
-	accessToken, err := GenerateAccessToken(userUUID)
+	// Generate tokens using the shared token functions
+	accessToken, err := token.GenerateAccessToken(userUUID)
 	if err != nil {
 		return "", "", fmt.Errorf("error generating access token: %v", err)
 	}
-	refreshToken, err := GenerateRefreshToken(userUUID)
+	refreshToken, err := token.GenerateRefreshToken(userUUID)
 	if err != nil {
 		return "", "", fmt.Errorf("error generating refresh token: %v", err)
 	}
@@ -217,13 +218,4 @@ func LoadAuthPrivateKey(username string) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("error parsing auth private key: %v", err)
 	}
 	return privKey, nil
-}
-
-// Placeholder token generation functions; replace with actual implementations.
-func GenerateAccessToken(userUUID string) (string, error) {
-	return "accessToken_for_" + userUUID, nil
-}
-
-func GenerateRefreshToken(userUUID string) (string, error) {
-	return "refreshToken_for_" + userUUID, nil
 }

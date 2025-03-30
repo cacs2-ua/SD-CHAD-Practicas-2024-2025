@@ -24,6 +24,7 @@ import (
 	"prac/pkg/functionalities"
 	"prac/pkg/logging"
 	"prac/pkg/store"
+	"prac/pkg/token"
 
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
@@ -71,6 +72,8 @@ func init() {
 	if !ok {
 		log.Fatal("Private key is not of type Ed25519")
 	}
+	// Set token signing key
+	token.SetPrivateKey(privateKey)
 
 	// Load public key from keys/public.pem
 	pubBytes, err := ioutil.ReadFile("keys/public.pem")
@@ -420,11 +423,11 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 	if err != nil {
 		return api.Response{Success: false, Message: "Error decrypting username"}, "", ""
 	}
-	accessToken, err := generateAccessToken(decryptedUUID)
+	accessToken, err := token.GenerateAccessToken(decryptedUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error generating access token"}, "", ""
 	}
-	refreshToken, err := generateRefreshToken(decryptedUUID)
+	refreshToken, err := token.GenerateRefreshToken(decryptedUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error generating refresh token"}, "", ""
 	}
@@ -460,11 +463,11 @@ func (s *serverImpl) refreshToken(req api.Request, providedRefreshToken string) 
 	if err != nil {
 		return api.Response{Success: false, Message: "Expired or invalid refresh token"}, "", ""
 	}
-	newAccessToken, err := generateAccessToken(decryptedUUID)
+	newAccessToken, err := token.GenerateAccessToken(decryptedUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error generating new access token"}, "", ""
 	}
-	newRefreshToken, err := generateRefreshToken(decryptedUUID)
+	newRefreshToken, err := token.GenerateRefreshToken(decryptedUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error generating new refresh token"}, "", ""
 	}
