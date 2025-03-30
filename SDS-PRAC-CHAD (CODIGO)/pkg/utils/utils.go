@@ -41,7 +41,7 @@ func GetHashedUUIDFromUsername(db store.Store, username string) (string, error) 
 // GetEncryptedUUIDFromUsername obtains the encrypted version of the hashed UUID for a user.
 // It first gets the hashed UUID (hex-encoded) using GetHashedUUIDFromUsername, decodes it,
 // and then retrieves from the "cheese_auth_cypher_uuid" bucket the stored encrypted value.
-func GetEncryptedUUIDFromUsername(db store.Store, username string) (string, error) {
+func GetEncryptedHashedUUIDFromUsername(db store.Store, username string) (string, error) {
 	// Get the hashed UUID (hex encoded) using the existing function.
 	hashedUUIDHex, err := GetHashedUUIDFromUsername(db, username)
 	if err != nil {
@@ -52,8 +52,7 @@ func GetEncryptedUUIDFromUsername(db store.Store, username string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("error decoding hashed UUID: %v", err)
 	}
-	// Retrieve the encrypted hashed UUID from the new bucket.
-	encrypted, err := db.Get("cheese_auth_cypher_uuid", hashedUUIDBytes)
+	encrypted, err := db.Get("cheese_auth_cipher_hashed_uuid", hashedUUIDBytes)
 	if err != nil {
 		return "", fmt.Errorf("error retrieving encrypted UUID: %v", err)
 	}

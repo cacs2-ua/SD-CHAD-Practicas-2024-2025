@@ -47,7 +47,7 @@ var bucketAuthPassword = "cheese_auth_password"
 var bucketAuthEmail = "cheese_auth_email"
 var bucketAuthUsername = "cheese_auth_username"
 var bucketAuthUsernameEmail = "cheese_auth_username_email"
-var bucketAuthCypherUUID = "cheese_auth_cypher_uuid"
+var bucketAuthCypherHashedUUID = "cheese_auth_cipher_hashed_uuid"
 var bucketMessages = "messages"
 
 var (
@@ -342,7 +342,7 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if err != nil {
 		return api.Response{Success: false, Message: "Error encrypting cypher UUID: " + err.Error()}
 	}
-	if err := s.db.Put(bucketAuthCypherUUID, keyUUID, []byte(encryptedCypher)); err != nil {
+	if err := s.db.Put(bucketAuthCypherHashedUUID, keyUUID, []byte(encryptedCypher)); err != nil {
 		return api.Response{Success: false, Message: "Error saving cypher UUID: " + err.Error()}
 	}
 
@@ -682,11 +682,11 @@ func (s *serverImpl) handleSendMessage(req api.Request) api.Response {
 	}
 
 	// Get the encrypted hashed UUID for sender and recipient using the new utility function.
-	encryptedUUIDSender, err := utils.GetEncryptedUUIDFromUsername(s.db, sender)
+	encryptedUUIDSender, err := utils.GetEncryptedHashedUUIDFromUsername(s.db, sender)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for sender: " + err.Error()}
 	}
-	encryptedUUIDRecipient, err := utils.GetEncryptedUUIDFromUsername(s.db, recipient)
+	encryptedUUIDRecipient, err := utils.GetEncryptedHashedUUIDFromUsername(s.db, recipient)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for recipient: " + err.Error()}
 	}
@@ -729,11 +729,11 @@ func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 	}
 
 	// Get the encrypted hashed UUID for both the sender and the partner.
-	encryptedUUIDSender, err := utils.GetEncryptedUUIDFromUsername(s.db, sender)
+	encryptedUUIDSender, err := utils.GetEncryptedHashedUUIDFromUsername(s.db, sender)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for sender: " + err.Error()}
 	}
-	encryptedUUIDPartner, err := utils.GetEncryptedUUIDFromUsername(s.db, partner)
+	encryptedUUIDPartner, err := utils.GetEncryptedHashedUUIDFromUsername(s.db, partner)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for partner: " + err.Error()}
 	}
