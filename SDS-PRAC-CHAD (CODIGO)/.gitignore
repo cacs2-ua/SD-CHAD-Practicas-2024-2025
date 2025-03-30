@@ -30,3 +30,4 @@ data/server.db
 # Ignorar carpeta de logs y backups
 /logs/
 /backups/
+keys/users/
