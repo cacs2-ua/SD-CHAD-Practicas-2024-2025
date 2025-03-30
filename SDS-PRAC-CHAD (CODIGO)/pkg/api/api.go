@@ -1,14 +1,16 @@
 package api
 
 const (
-	ActionRegister   = "register"
-	ActionLogin      = "login"
-	ActionFetchData  = "fetchData"
-	ActionUpdateData = "updateData"
-	ActionLogout     = "logout"
-	ActionRefresh    = "refresh" // new action for token refresh
-	ActionBackup     = "backup"  // new action for database backup
-	ActionRestore    = "restore" // new action for database restore
+	ActionRegister               = "register"
+	ActionLogin                  = "login"
+	ActionPublicKeyLogin         = "publicKeyLogin"
+	ActionPublicKeyLoginResponse = "publicKeyLoginResponse"
+	ActionFetchData              = "fetchData"
+	ActionUpdateData             = "updateData"
+	ActionLogout                 = "logout"
+	ActionRefresh                = "refresh" // new action for token refresh
+	ActionBackup                 = "backup"  // new action for database backup
+	ActionRestore                = "restore" // new action for database restore
 
 	// New actions for secure messaging functionality
 	ActionGetUsernames = "getUsernames"

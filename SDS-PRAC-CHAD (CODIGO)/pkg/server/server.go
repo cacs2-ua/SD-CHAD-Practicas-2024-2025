@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/x509"
@@ -24,6 +25,8 @@ import (
 	"prac/pkg/functionalities"
 	"prac/pkg/logging"
 	"prac/pkg/store"
+	"prac/pkg/token"
+	"prac/pkg/utils"
 
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
@@ -44,6 +47,7 @@ var bucketAuthPassword = "cheese_auth_password"
 var bucketAuthEmail = "cheese_auth_email"
 var bucketAuthUsername = "cheese_auth_username"
 var bucketAuthUsernameEmail = "cheese_auth_username_email"
+var bucketAuthCypherHashedUUID = "cheese_auth_cipher_hashed_uuid"
 var bucketMessages = "messages"
 
 var (
@@ -71,6 +75,8 @@ func init() {
 	if !ok {
 		log.Fatal("Private key is not of type Ed25519")
 	}
+	// Set token signing key
+	token.SetPrivateKey(privateKey)
 
 	// Load public key from keys/public.pem
 	pubBytes, err := ioutil.ReadFile("keys/public.pem")
@@ -229,6 +235,30 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res = s.registerUser(req)
 	case api.ActionLogin:
 		res, newAccessToken, newRefreshToken = s.loginUser(req)
+	case api.ActionPublicKeyLogin:
+		// Initiate public key login; req.Email must be provided
+		challenge, username, err := functionalities.InitiatePublicKeyLogin(s.db, req.Email)
+		if err != nil {
+			res = api.Response{Success: false, Message: err.Error()}
+		} else {
+			// Return a JSON object with the challenge and username
+			dataObj := map[string]string{
+				"challenge": challenge,
+				"username":  username,
+			}
+			dataBytes, _ := json.Marshal(dataObj)
+			res = api.Response{Success: true, Message: "Challenge generated", Data: string(dataBytes)}
+		}
+	case api.ActionPublicKeyLoginResponse:
+		// Verify public key login response; req.Email and req.Data (signature) are required
+		accessToken, refreshToken, err := functionalities.VerifyPublicKeyLogin(s.db, req.Email, req.Data)
+		if err != nil {
+			res = api.Response{Success: false, Message: err.Error()}
+		} else {
+			res = api.Response{Success: true, Message: "Public key login successful"}
+			newAccessToken = accessToken
+			newRefreshToken = refreshToken
+		}
 	case api.ActionRefresh:
 		res, newAccessToken, newRefreshToken = s.refreshToken(req, providedRefreshToken)
 	case api.ActionFetchData:
@@ -308,6 +338,14 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 
 	keyUUID := store.HashBytes([]byte(userUUID))
 
+	encryptedCypher, err := crypto.EncryptServer(keyUUID)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error encrypting cypher UUID: " + err.Error()}
+	}
+	if err := s.db.Put(bucketAuthCypherHashedUUID, keyUUID, []byte(encryptedCypher)); err != nil {
+		return api.Response{Success: false, Message: "Error saving cypher UUID: " + err.Error()}
+	}
+
 	if err := s.db.Put(bucketAuthUUID, keyEmail, []byte(encryptedUUID)); err != nil {
 		return api.Response{Success: false, Message: "Error saving encrypted UUID"}
 	}
@@ -330,6 +368,10 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	// Generate RSA key pair for messaging
 	if err := functionalities.GenerateKeyPair(req.Username); err != nil {
 		return api.Response{Success: false, Message: "Error generating key pair for messaging: " + err.Error()}
+	}
+
+	if err := functionalities.GenerateAuthKeyPair(s.db, req.Username, userUUID); err != nil {
+		return api.Response{Success: false, Message: "Error generating auth key pair: " + err.Error()}
 	}
 
 	return api.Response{Success: true, Message: "User registered"}
@@ -392,11 +434,11 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 	if err != nil {
 		return api.Response{Success: false, Message: "Error decrypting username"}, "", ""
 	}
-	accessToken, err := generateAccessToken(decryptedUUID)
+	accessToken, err := token.GenerateAccessToken(decryptedUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error generating access token"}, "", ""
 	}
-	refreshToken, err := generateRefreshToken(decryptedUUID)
+	refreshToken, err := token.GenerateRefreshToken(decryptedUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error generating refresh token"}, "", ""
 	}
@@ -432,11 +474,11 @@ func (s *serverImpl) refreshToken(req api.Request, providedRefreshToken string) 
 	if err != nil {
 		return api.Response{Success: false, Message: "Expired or invalid refresh token"}, "", ""
 	}
-	newAccessToken, err := generateAccessToken(decryptedUUID)
+	newAccessToken, err := token.GenerateAccessToken(decryptedUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error generating new access token"}, "", ""
 	}
-	newRefreshToken, err := generateRefreshToken(decryptedUUID)
+	newRefreshToken, err := token.GenerateRefreshToken(decryptedUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error generating new refresh token"}, "", ""
 	}
@@ -638,13 +680,26 @@ func (s *serverImpl) handleSendMessage(req api.Request) api.Response {
 	if sender == "" || recipient == "" || req.Data == "" {
 		return api.Response{Success: false, Message: "Missing sender, recipient, or data"}
 	}
-	// Create conversation id by lexicographically sorting sender and recipient.
-	convID := ""
-	if strings.Compare(sender, recipient) < 0 {
-		convID = sender + ":" + recipient
-	} else {
-		convID = recipient + ":" + sender
+
+	// Get the encrypted hashed UUID for sender and recipient using the new utility function.
+	encryptedUUIDSender, err := utils.GetEncryptedHashedUUIDFromUsername(s.db, sender)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for sender: " + err.Error()}
 	}
+	encryptedUUIDRecipient, err := utils.GetEncryptedHashedUUIDFromUsername(s.db, recipient)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for recipient: " + err.Error()}
+	}
+
+	// Create the conversation ID by lexicographically sorting the two encrypted UUIDs.
+	var convID string
+	if encryptedUUIDSender < encryptedUUIDRecipient {
+		convID = fmt.Sprintf("%s:%s", encryptedUUIDSender, encryptedUUIDRecipient)
+	} else {
+		convID = fmt.Sprintf("%s:%s", encryptedUUIDRecipient, encryptedUUIDSender)
+	}
+
+	// Append the current timestamp.
 	timestamp := time.Now().UnixNano()
 	messageKey := fmt.Sprintf("%s:%d", convID, timestamp)
 
@@ -658,6 +713,7 @@ func (s *serverImpl) handleSendMessage(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error encoding chat message: " + err.Error()}
 	}
 
+	// Store the message using the new conversation key.
 	if err := s.db.Put(bucketMessages, []byte(messageKey), chatMsgBytes); err != nil {
 		return api.Response{Success: false, Message: "Error storing message: " + err.Error()}
 	}
@@ -671,33 +727,46 @@ func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 	if sender == "" || partner == "" {
 		return api.Response{Success: false, Message: "Missing sender or conversation partner"}
 	}
-	convID := ""
-	if strings.Compare(sender, partner) < 0 {
-		convID = sender + ":" + partner
-	} else {
-		convID = partner + ":" + sender
+
+	// Get the encrypted hashed UUID for both the sender and the partner.
+	encryptedUUIDSender, err := utils.GetEncryptedHashedUUIDFromUsername(s.db, sender)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for sender: " + err.Error()}
 	}
+	encryptedUUIDPartner, err := utils.GetEncryptedHashedUUIDFromUsername(s.db, partner)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for partner: " + err.Error()}
+	}
+
+	// Create the conversation ID by lexicographically sorting the encrypted UUIDs.
+	var convID string
+	if encryptedUUIDSender < encryptedUUIDPartner {
+		convID = fmt.Sprintf("%s:%s", encryptedUUIDSender, encryptedUUIDPartner)
+	} else {
+		convID = fmt.Sprintf("%s:%s", encryptedUUIDPartner, encryptedUUIDSender)
+	}
+
+	// Use convID as a prefix to retrieve all messages for the conversation.
+	prefix := []byte(convID + ":")
 	var chatMessages []ChatMessage
 	bs, ok := s.db.(*store.BboltStore)
 	if !ok {
 		return api.Response{Success: false, Message: "Store type assertion failed"}
 	}
 	bucketName := store.BucketName(bucketMessages)
-	err := bs.DB.View(func(tx *bbolt.Tx) error {
+	err = bs.DB.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketName)
 		if b == nil {
 			return fmt.Errorf("messages bucket not found")
 		}
 		c := b.Cursor()
-		prefix := []byte(convID + ":")
-		for k, v := c.Seek(prefix); k != nil && strings.HasPrefix(string(k), convID+":"); k, v = c.Next() {
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
 			var chatMsg ChatMessage
-			// v is stored encrypted by EncryptServer, so first decrypt with DecryptServer:
+			// The stored value is encrypted with EncryptServer; decrypt it first.
 			decryptedVal, err := crypto.DecryptServer(v)
 			if err != nil {
-				continue // skip if decryption fails
+				continue // Skip if decryption fails.
 			}
-			// Now unmarshal the decrypted value into ChatMessage.
 			if err := json.Unmarshal(decryptedVal, &chatMsg); err != nil {
 				continue
 			}

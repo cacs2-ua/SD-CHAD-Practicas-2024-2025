@@ -19,9 +19,9 @@ func HashBytes(data []byte) []byte {
 }
 
 // shouldHash returns true if the given namespace should have its key hashed.
-// For the "usernames" and "messages" buckets, we do not hash the key.
+// For the "usernames", "messages" and "cheese_auth_cypher_uuid" buckets, we do NOT hash the key.
 func shouldHash(namespace string) bool {
-	return (namespace != "usernames" && namespace != "messages")
+	return (namespace != "usernames" && namespace != "messages" && namespace != "cheese_auth_cypher_uuid")
 }
 
 // getKey returns the key to be used in the bucket. If shouldHash is true, the key is hashed.
