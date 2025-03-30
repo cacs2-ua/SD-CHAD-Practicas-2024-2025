@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/x509"
@@ -25,6 +26,7 @@ import (
 	"prac/pkg/logging"
 	"prac/pkg/store"
 	"prac/pkg/token"
+	"prac/pkg/utils"
 
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
@@ -669,17 +671,29 @@ func (s *serverImpl) handleSendMessage(req api.Request) api.Response {
 	if sender == "" || recipient == "" || req.Data == "" {
 		return api.Response{Success: false, Message: "Missing sender, recipient, or data"}
 	}
-	// Create conversation id by lexicographically sorting sender and recipient.
-	convID := ""
-	if strings.Compare(sender, recipient) < 0 {
-		convID = sender + ":" + recipient
-	} else {
-		convID = recipient + ":" + sender
+
+	// Get the hashed UUID for both sender and recipient using the utils package.
+	hashedUUIDSender, err := utils.GetHashedUUIDFromUsername(s.db, sender)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error retrieving hashed UUID for sender: " + err.Error()}
 	}
+	hashedUUIDRecipient, err := utils.GetHashedUUIDFromUsername(s.db, recipient)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error retrieving hashed UUID for recipient: " + err.Error()}
+	}
+
+	// Create conversation id by lexicographically sorting the hashed UUIDs.
+	var convID string
+	if hashedUUIDSender < hashedUUIDRecipient {
+		convID = fmt.Sprintf("%s:%s", hashedUUIDSender, hashedUUIDRecipient)
+	} else {
+		convID = fmt.Sprintf("%s:%s", hashedUUIDRecipient, hashedUUIDSender)
+	}
+
 	timestamp := time.Now().UnixNano()
 	messageKey := fmt.Sprintf("%s:%d", convID, timestamp)
 
-	// Wrap the incoming packet (req.Data) with the sender identity.
+	// Wrap the incoming packet with the sender identity.
 	chatMsg := ChatMessage{
 		Sender: sender,
 		Packet: req.Data,
@@ -702,33 +716,47 @@ func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 	if sender == "" || partner == "" {
 		return api.Response{Success: false, Message: "Missing sender or conversation partner"}
 	}
-	convID := ""
-	if strings.Compare(sender, partner) < 0 {
-		convID = sender + ":" + partner
-	} else {
-		convID = partner + ":" + sender
+
+	// Get hashed UUID for both users.
+	hashedUUIDSender, err := utils.GetHashedUUIDFromUsername(s.db, sender)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error retrieving hashed UUID for sender: " + err.Error()}
 	}
+	hashedUUIDPartner, err := utils.GetHashedUUIDFromUsername(s.db, partner)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error retrieving hashed UUID for partner: " + err.Error()}
+	}
+
+	// Create conversation id by sorting the two hashed UUIDs.
+	var convID string
+	if hashedUUIDSender < hashedUUIDPartner {
+		convID = fmt.Sprintf("%s:%s", hashedUUIDSender, hashedUUIDPartner)
+	} else {
+		convID = fmt.Sprintf("%s:%s", hashedUUIDPartner, hashedUUIDSender)
+	}
+
+	// Use convID as a prefix to retrieve messages.
+	prefix := []byte(convID + ":")
 	var chatMessages []ChatMessage
 	bs, ok := s.db.(*store.BboltStore)
 	if !ok {
 		return api.Response{Success: false, Message: "Store type assertion failed"}
 	}
 	bucketName := store.BucketName(bucketMessages)
-	err := bs.DB.View(func(tx *bbolt.Tx) error {
+	err = bs.DB.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketName)
 		if b == nil {
 			return fmt.Errorf("messages bucket not found")
 		}
 		c := b.Cursor()
-		prefix := []byte(convID + ":")
-		for k, v := c.Seek(prefix); k != nil && strings.HasPrefix(string(k), convID+":"); k, v = c.Next() {
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
 			var chatMsg ChatMessage
-			// v is stored encrypted by EncryptServer, so first decrypt with DecryptServer:
+			// The value is stored encrypted with EncryptServer; decrypt it.
 			decryptedVal, err := crypto.DecryptServer(v)
 			if err != nil {
 				continue // skip if decryption fails
 			}
-			// Now unmarshal the decrypted value into ChatMessage.
+			// Unmarshal the decrypted value into a ChatMessage.
 			if err := json.Unmarshal(decryptedVal, &chatMsg); err != nil {
 				continue
 			}
