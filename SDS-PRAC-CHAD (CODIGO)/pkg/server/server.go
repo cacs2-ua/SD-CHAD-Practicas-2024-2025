@@ -47,6 +47,7 @@ var bucketAuthPassword = "cheese_auth_password"
 var bucketAuthEmail = "cheese_auth_email"
 var bucketAuthUsername = "cheese_auth_username"
 var bucketAuthUsernameEmail = "cheese_auth_username_email"
+var bucketAuthCypherUUID = "cheese_auth_cypher_uuid"
 var bucketMessages = "messages"
 
 var (
@@ -336,6 +337,14 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	}
 
 	keyUUID := store.HashBytes([]byte(userUUID))
+
+	encryptedCypher, err := crypto.EncryptServer(keyUUID)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error encrypting cypher UUID: " + err.Error()}
+	}
+	if err := s.db.Put(bucketAuthCypherUUID, keyUUID, []byte(encryptedCypher)); err != nil {
+		return api.Response{Success: false, Message: "Error saving cypher UUID: " + err.Error()}
+	}
 
 	if err := s.db.Put(bucketAuthUUID, keyEmail, []byte(encryptedUUID)); err != nil {
 		return api.Response{Success: false, Message: "Error saving encrypted UUID"}
@@ -672,28 +681,29 @@ func (s *serverImpl) handleSendMessage(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Missing sender, recipient, or data"}
 	}
 
-	// Get the hashed UUID for both sender and recipient using the utils package.
-	hashedUUIDSender, err := utils.GetHashedUUIDFromUsername(s.db, sender)
+	// Get the encrypted hashed UUID for sender and recipient using the new utility function.
+	encryptedUUIDSender, err := utils.GetEncryptedUUIDFromUsername(s.db, sender)
 	if err != nil {
-		return api.Response{Success: false, Message: "Error retrieving hashed UUID for sender: " + err.Error()}
+		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for sender: " + err.Error()}
 	}
-	hashedUUIDRecipient, err := utils.GetHashedUUIDFromUsername(s.db, recipient)
+	encryptedUUIDRecipient, err := utils.GetEncryptedUUIDFromUsername(s.db, recipient)
 	if err != nil {
-		return api.Response{Success: false, Message: "Error retrieving hashed UUID for recipient: " + err.Error()}
+		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for recipient: " + err.Error()}
 	}
 
-	// Create conversation id by lexicographically sorting the hashed UUIDs.
+	// Create the conversation ID by lexicographically sorting the two encrypted UUIDs.
 	var convID string
-	if hashedUUIDSender < hashedUUIDRecipient {
-		convID = fmt.Sprintf("%s:%s", hashedUUIDSender, hashedUUIDRecipient)
+	if encryptedUUIDSender < encryptedUUIDRecipient {
+		convID = fmt.Sprintf("%s:%s", encryptedUUIDSender, encryptedUUIDRecipient)
 	} else {
-		convID = fmt.Sprintf("%s:%s", hashedUUIDRecipient, hashedUUIDSender)
+		convID = fmt.Sprintf("%s:%s", encryptedUUIDRecipient, encryptedUUIDSender)
 	}
 
+	// Append the current timestamp.
 	timestamp := time.Now().UnixNano()
 	messageKey := fmt.Sprintf("%s:%d", convID, timestamp)
 
-	// Wrap the incoming packet with the sender identity.
+	// Wrap the incoming packet (req.Data) with the sender identity.
 	chatMsg := ChatMessage{
 		Sender: sender,
 		Packet: req.Data,
@@ -703,6 +713,7 @@ func (s *serverImpl) handleSendMessage(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error encoding chat message: " + err.Error()}
 	}
 
+	// Store the message using the new conversation key.
 	if err := s.db.Put(bucketMessages, []byte(messageKey), chatMsgBytes); err != nil {
 		return api.Response{Success: false, Message: "Error storing message: " + err.Error()}
 	}
@@ -717,25 +728,25 @@ func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Missing sender or conversation partner"}
 	}
 
-	// Get hashed UUID for both users.
-	hashedUUIDSender, err := utils.GetHashedUUIDFromUsername(s.db, sender)
+	// Get the encrypted hashed UUID for both the sender and the partner.
+	encryptedUUIDSender, err := utils.GetEncryptedUUIDFromUsername(s.db, sender)
 	if err != nil {
-		return api.Response{Success: false, Message: "Error retrieving hashed UUID for sender: " + err.Error()}
+		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for sender: " + err.Error()}
 	}
-	hashedUUIDPartner, err := utils.GetHashedUUIDFromUsername(s.db, partner)
+	encryptedUUIDPartner, err := utils.GetEncryptedUUIDFromUsername(s.db, partner)
 	if err != nil {
-		return api.Response{Success: false, Message: "Error retrieving hashed UUID for partner: " + err.Error()}
+		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for partner: " + err.Error()}
 	}
 
-	// Create conversation id by sorting the two hashed UUIDs.
+	// Create the conversation ID by lexicographically sorting the encrypted UUIDs.
 	var convID string
-	if hashedUUIDSender < hashedUUIDPartner {
-		convID = fmt.Sprintf("%s:%s", hashedUUIDSender, hashedUUIDPartner)
+	if encryptedUUIDSender < encryptedUUIDPartner {
+		convID = fmt.Sprintf("%s:%s", encryptedUUIDSender, encryptedUUIDPartner)
 	} else {
-		convID = fmt.Sprintf("%s:%s", hashedUUIDPartner, hashedUUIDSender)
+		convID = fmt.Sprintf("%s:%s", encryptedUUIDPartner, encryptedUUIDSender)
 	}
 
-	// Use convID as a prefix to retrieve messages.
+	// Use convID as a prefix to retrieve all messages for the conversation.
 	prefix := []byte(convID + ":")
 	var chatMessages []ChatMessage
 	bs, ok := s.db.(*store.BboltStore)
@@ -751,12 +762,11 @@ func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 		c := b.Cursor()
 		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
 			var chatMsg ChatMessage
-			// The value is stored encrypted with EncryptServer; decrypt it.
+			// The stored value is encrypted with EncryptServer; decrypt it first.
 			decryptedVal, err := crypto.DecryptServer(v)
 			if err != nil {
-				continue // skip if decryption fails
+				continue // Skip if decryption fails.
 			}
-			// Unmarshal the decrypted value into a ChatMessage.
 			if err := json.Unmarshal(decryptedVal, &chatMsg); err != nil {
 				continue
 			}
