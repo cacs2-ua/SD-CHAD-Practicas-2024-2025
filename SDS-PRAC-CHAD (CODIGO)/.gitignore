@@ -31,3 +31,4 @@ data/server.db
 /logs/
 /backups/
 keys/users/
+keys/users/users-auth
