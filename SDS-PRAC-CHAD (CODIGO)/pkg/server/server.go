@@ -278,6 +278,14 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res = s.handleSendMessage(req)
 	case api.ActionGetMessages:
 		res = s.handleGetMessages(req)
+	case api.ActionCreatePoll:
+		res = s.handleCreatePoll(req, providedAccessToken)
+	case api.ActionVoteInPoll:
+		res = s.handleVoteInPoll(req, providedAccessToken)
+	case api.ActionViewResults:
+		res = s.handleViewResults(req, providedAccessToken)
+	case api.ActionListPolls:
+		res = s.handleListPolls(req, providedAccessToken)
 	default:
 		res = api.Response{Success: false, Message: "Unknown action"}
 	}
