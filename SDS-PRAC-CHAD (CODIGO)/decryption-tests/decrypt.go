@@ -1,16 +1,8 @@
 package main
 
-import (
-	"encoding/base64"
-	"fmt"
-	"log"
-
-	"prac/pkg/crypto"
-)
-
 func main() {
 	// Replace this with the base64 ciphertext obtained from the database (or from client update logs)
-	ciphertextBase64 := "wPiMBniZZW+T+7J4TCBvDbxNZpVVlREAEt0dLQW4UFquHtwAe2XI5Jr8Jbcyk8zziVo88pvBY2fV8TGb"
+	/*ciphertextBase64 := "wPiMBniZZW+T+7J4TCBvDbxNZpVVlREAEt0dLQW4UFquHtwAe2XI5Jr8Jbcyk8zziVo88pvBY2fV8TGb"
 
 	// Decode the base64 string to get the encrypted data (nonce + ciphertext)
 	ciphertext, err := base64.StdEncoding.DecodeString(ciphertextBase64)
@@ -34,5 +26,5 @@ func main() {
 		log.Fatalf("Error decrypting data: %v", err)
 	}
 
-	fmt.Println("Decrypted plaintext:", string(plaintext))
+	fmt.Println("Decrypted plaintext:", string(plaintext))*/
 }
