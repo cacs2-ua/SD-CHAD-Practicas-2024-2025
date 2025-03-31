@@ -33,7 +33,7 @@ type UserVote struct {
 
 // handleCreatePoll crea una nueva encuesta con las opciones especificadas
 func (s *serverImpl) handleCreatePoll(req api.Request, providedAccessToken string) api.Response {
-	if req.Username == "" || providedAccessToken == "" {
+	/*if req.Username == "" || providedAccessToken == "" {
 		return api.Response{Success: false, Message: "No estás autenticado"}
 	}
 
@@ -44,7 +44,7 @@ func (s *serverImpl) handleCreatePoll(req api.Request, providedAccessToken strin
 	}
 	if !s.isAccessTokenValid(decryptedUUID, providedAccessToken) {
 		return api.Response{Success: false, Message: "Token de acceso inválido o expirado"}
-	}
+	}*/
 
 	// Decodificar los datos de la encuesta
 	var poll Poll
@@ -114,7 +114,7 @@ func (s *serverImpl) handleCreatePoll(req api.Request, providedAccessToken strin
 
 // handleVoteInPoll permite a un usuario votar en una encuesta
 func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken string) api.Response {
-	if req.Username == "" || providedAccessToken == "" {
+	/*if req.Username == "" || providedAccessToken == "" {
 		return api.Response{Success: false, Message: "No estás autenticado"}
 	}
 
@@ -125,7 +125,9 @@ func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken strin
 	}
 	if !s.isAccessTokenValid(decryptedUUID, providedAccessToken) {
 		return api.Response{Success: false, Message: "Token de acceso inválido o expirado"}
-	}
+	}*/
+
+	decryptedUUID, err := s.lookupUUIDFromUsername(req.Username)
 
 	// Decodificar los datos del voto
 	var voteData struct {
@@ -204,7 +206,7 @@ func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken strin
 
 // handleViewResults obtiene los resultados de una encuesta específica
 func (s *serverImpl) handleViewResults(req api.Request, providedAccessToken string) api.Response {
-	if req.Username == "" || providedAccessToken == "" {
+	/*if req.Username == "" || providedAccessToken == "" {
 		return api.Response{Success: false, Message: "No estás autenticado"}
 	}
 
@@ -215,7 +217,7 @@ func (s *serverImpl) handleViewResults(req api.Request, providedAccessToken stri
 	}
 	if !s.isAccessTokenValid(decryptedUUID, providedAccessToken) {
 		return api.Response{Success: false, Message: "Token de acceso inválido o expirado"}
-	}
+	}*/
 
 	// Obtener el ID de la encuesta
 	pollID := req.Data
@@ -246,7 +248,7 @@ func (s *serverImpl) handleViewResults(req api.Request, providedAccessToken stri
 
 // handleListPolls obtiene la lista de todas las encuestas disponibles
 func (s *serverImpl) handleListPolls(req api.Request, providedAccessToken string) api.Response {
-	if req.Username == "" || providedAccessToken == "" {
+	/*if req.Username == "" || providedAccessToken == "" {
 		return api.Response{Success: false, Message: "No estás autenticado"}
 	}
 
@@ -257,7 +259,9 @@ func (s *serverImpl) handleListPolls(req api.Request, providedAccessToken string
 	}
 	if !s.isAccessTokenValid(decryptedUUID, providedAccessToken) {
 		return api.Response{Success: false, Message: "Token de acceso inválido o expirado"}
-	}
+	}*/
+
+	_, err := s.lookupUUIDFromUsername(req.Username)
 
 	// Obtener todas las encuestas
 	bs, ok := s.db.(*store.BboltStore)
