@@ -120,6 +120,9 @@ func (c *client) runLoop() {
 			options = []string{
 				"View data",
 				"Update data",
+				"Vote in a poll",
+				"Create a poll",
+				"View results",
 				"Logout",
 				"Exit",
 				"Create Backup",
@@ -156,17 +159,23 @@ func (c *client) runLoop() {
 			case 2:
 				c.updateData()
 			case 3:
-				c.logoutUser()
+				c.voteInPoll()
 			case 4:
+				c.createPoll()
+			case 5:
+				c.viewResults()
+			case 6:
+				c.logoutUser()
+			case 7:
 				// Exit option.
 				c.log.Println("Exiting client...")
 				return
-			case 5:
+			case 8:
 				// Create a backup of the database file.
 				c.createBackup()
-			case 6:
+			case 9:
 				c.restoreBackupFromDrive()
-			case 7:
+			case 0:
 				c.messagesMenu()
 			}
 		}
