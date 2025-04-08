@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"log"
 	"time"
 
 	"prac/pkg/api"
@@ -127,7 +128,7 @@ func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken strin
 		return api.Response{Success: false, Message: "Token de acceso inválido o expirado"}
 	}*/
 
-	decryptedUUID, err := s.lookupUUIDFromUsername(req.Username)
+	decryptedUUID, _ := s.lookupUUIDFromUsername(req.Username)
 
 	// Decodificar los datos del voto
 	var voteData struct {
@@ -140,7 +141,7 @@ func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken strin
 
 	// Verificar si el usuario ya ha votado en esta encuesta
 	userVoteKey := decryptedUUID + ":" + voteData.PollID
-	_, err = s.db.Get(bucketUserVotes, []byte(userVoteKey))
+	_, err := s.db.Get(bucketUserVotes, []byte(userVoteKey))
 	if err == nil {
 		return api.Response{Success: false, Message: "Ya has votado en esta encuesta"}
 	}
@@ -261,7 +262,7 @@ func (s *serverImpl) handleListPolls(req api.Request, providedAccessToken string
 		return api.Response{Success: false, Message: "Token de acceso inválido o expirado"}
 	}*/
 
-	_, err := s.lookupUUIDFromUsername(req.Username)
+	//_, err := s.lookupUUIDFromUsername(req.Username)
 
 	// Obtener todas las encuestas
 	bs, ok := s.db.(*store.BboltStore)
@@ -270,7 +271,7 @@ func (s *serverImpl) handleListPolls(req api.Request, providedAccessToken string
 	}
 
 	var polls []Poll
-	err = bs.DB.View(func(tx *bbolt.Tx) error {
+	err := bs.DB.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(store.BucketName(bucketPolls))
 		if b == nil {
 			return nil // No hay encuestas
@@ -285,6 +286,65 @@ func (s *serverImpl) handleListPolls(req api.Request, providedAccessToken string
 			return nil
 		})
 	})
+	if err != nil {
+		return api.Response{Success: false, Message: "Error al obtener las encuestas: " + err.Error()}
+	}
+
+	// Serializar la lista de encuestas
+	pollsData, err := json.Marshal(polls)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error al serializar las encuestas: " + err.Error()}
+	}
+
+	return api.Response{
+		Success: true,
+		Message: "Encuestas obtenidas correctamente",
+		Data:    string(pollsData),
+	}
+}
+
+func (s *serverImpl) handleListPolls2(req api.Request, providedAccessToken string) api.Response {
+	// Verificar si el usuario está autenticado
+	/*if req.Username == "" || providedAccessToken == "" {
+		return api.Response{Success: false, Message: "No estás autenticado"}
+	}*/
+
+	// Obtener el UUID del usuario
+	_, err := s.lookupUUIDFromUsername(req.Username)
+	if err != nil {
+		return api.Response{Success: false, Message: err.Error()}
+	}
+
+	// Obtener la base de datos BoltDB
+	bs, ok := s.db.(*store.BboltStore)
+	if !ok {
+		return api.Response{Success: false, Message: "Error al acceder a la base de datos"}
+	}
+
+	// Obtener todas las encuestas
+	var polls []Poll
+
+	err = bs.DB.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(store.BucketName(bucketPolls))
+		if b == nil {
+			log.Println("Bucket de encuestas no encontrado")
+			return nil // No hay encuestas, no es un error
+		}
+
+		return b.ForEach(func(k, v []byte) error {
+			log.Printf("Clave: %s, Valor RAW: %s\n", k, v) // Log para depuración
+
+			var poll Poll
+			if err := json.Unmarshal(v, &poll); err != nil {
+				log.Printf("Error al deserializar la encuesta con clave %s: %v\n", k, err)
+				return err
+			}
+
+			polls = append(polls, poll)
+			return nil
+		})
+	})
+
 	if err != nil {
 		return api.Response{Success: false, Message: "Error al obtener las encuestas: " + err.Error()}
 	}
