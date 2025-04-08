@@ -16,6 +16,12 @@ const (
 	ActionGetUsernames = "getUsernames"
 	ActionSendMessage  = "sendMessage"
 	ActionGetMessages  = "getMessages"
+
+	//Actions for polls
+	ActionCreatePoll  = "createPoll"
+	ActionVoteInPoll  = "voteInPoll"
+	ActionViewResults = "viewResults"
+	ActionListPolls   = "listPolls"
 )
 
 // Request structure for communication between server and client.
