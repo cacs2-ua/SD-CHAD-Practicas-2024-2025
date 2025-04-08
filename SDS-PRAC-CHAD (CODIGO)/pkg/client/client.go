@@ -175,7 +175,7 @@ func (c *client) runLoop() {
 				c.createBackup()
 			case 9:
 				c.restoreBackupFromDrive()
-			case 0:
+			case 10:
 				c.messagesMenu()
 			}
 		}
@@ -684,7 +684,7 @@ func (c *client) restoreBackupFromDrive() {
 	fmt.Println("** Restore Backup from Google Drive **")
 
 	credentialsPath := "keys/credentials.json"           // Cambia esto por la ruta real.
-	driveFolderID := "1_gUO5uP3qjNxz9g9P_wy2AQNYGAW-lqf" // ID de la carpeta de Google Drive.
+	driveFolderID := "11gN_pH9h0RJkyQ19mZEtJLxVbEyH6ZFt" // ID de la carpeta de Google Drive.
 
 	// List available backups.
 	files, err := listBackupsFromGoogleDrive(driveFolderID, credentialsPath)
