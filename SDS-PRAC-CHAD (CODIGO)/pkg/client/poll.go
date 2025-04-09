@@ -91,7 +91,6 @@ func (c *client) createPoll() {
 	fmt.Println("Mensaje:", res.Message)
 	/*if res.Success {
 		fmt.Println("ID de la encuesta:", res.Data)
-		fmt.Println("IMPORTANTE: Guarda este ID para referencia futura.")
 	}*/
 }
 
@@ -172,11 +171,13 @@ func (c *client) voteInPoll() {
 
 	// Crear la estructura del voto
 	voteData := struct {
-		PollID string `json:"pollId"`
-		Option string `json:"option"`
+		PollID    string `json:"pollId"`
+		Option    string `json:"option"`
+		CreatedBy string `json:"createdBy"`
 	}{
-		PollID: selectedPoll.ID,
-		Option: selectedOption,
+		PollID:    selectedPoll.ID,
+		Option:    selectedOption,
+		CreatedBy: selectedPoll.CreatedBy,
 	}
 
 	// Serializar el voto
@@ -186,7 +187,8 @@ func (c *client) voteInPoll() {
 		return
 	}
 
-	fmt.Printf("Enviando voto para la encuesta con ID: %s, opción: %s\n", selectedPoll.ID, selectedOption)
+	//fmt.Printf("Enviando voto para la encuesta con ID: %s, opción: %s\n", selectedPoll.ID, selectedOption)
+	fmt.Printf("Enviando voto para la encuesta: %s\n", selectedPoll.Title)
 
 	// Enviar la solicitud al servidor
 	voteRes, _, _ := c.sendRequest(api.Request{
