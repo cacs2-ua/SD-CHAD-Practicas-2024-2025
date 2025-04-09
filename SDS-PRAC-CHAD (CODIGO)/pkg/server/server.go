@@ -278,6 +278,7 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res = s.handleSendMessage(req)
 	case api.ActionGetMessages:
 		res = s.handleGetMessages(req)
+	// Poll handlers
 	case api.ActionCreatePoll:
 		res = s.handleCreatePoll(req, providedAccessToken)
 	case api.ActionVoteInPoll:
