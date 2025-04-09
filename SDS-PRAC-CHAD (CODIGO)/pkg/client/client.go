@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -620,7 +621,13 @@ func (c *client) sendRequest(req api.Request) (api.Response, string, string) {
 		}
 	}
 
-	clientHttp := &http.Client{}
+	// Create HTTP client with TLS verification disabled
+	clientHttp := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+	//clientHttp := &http.Client{}
 
 	resp, err := clientHttp.Do(request)
 	if err != nil {
@@ -683,10 +690,10 @@ func (c *client) restoreBackupFromDrive() {
 	ui.ClearScreen()
 	fmt.Println("** Restore Backup from Google Drive **")
 
-	credentialsPath := "keys/credentials.json"           // Cambia esto por la ruta real.
+	credentialsPath := "keys/credentials.json"           // Ruta al archivo JSON con las credenciales.
 	driveFolderID := "11gN_pH9h0RJkyQ19mZEtJLxVbEyH6ZFt" // ID de la carpeta de Google Drive.
 
-	// List available backups.
+	// Listar los backups disponibles.
 	files, err := listBackupsFromGoogleDrive(driveFolderID, credentialsPath)
 	if err != nil {
 		fmt.Println("Error listing backups:", err)
@@ -706,27 +713,37 @@ func (c *client) restoreBackupFromDrive() {
 	for i, name := range names {
 		fmt.Printf("%d. %s\n", i+1, name)
 	}
+	fmt.Println("Enter the number of the backup to restore, or 'q' to return to the main menu.")
 
-	choice := ui.ReadInt("Select a backup to restore")
-	if choice < 1 || choice > len(names) {
-		fmt.Println("Invalid choice.")
+	// Solicitar la elección del usuario.
+	for {
+		input := ui.ReadInput("Select a backup to restore (or 'q' to quit)")
+		if strings.ToLower(input) == "q" {
+			fmt.Println("Returning to the main menu...")
+			return
+		}
+
+		choice, err := strconv.Atoi(input)
+		if err != nil || choice < 1 || choice > len(names) {
+			fmt.Println("Invalid choice. Please enter a valid number or 'q' to quit.")
+			continue
+		}
+
+		selectedName := names[choice-1]
+		selectedID := files[selectedName]
+
+		// Enviar la solicitud para restaurar el backup.
+		res, _, _ := c.sendRequest(api.Request{
+			Action: api.ActionRestore,
+			Data:   selectedID,
+		})
+
+		// Mostrar el resultado.
+		fmt.Println("Success:", res.Success)
+		fmt.Println("Message:", res.Message)
 		return
 	}
-
-	selectedName := names[choice-1]
-	selectedID := files[selectedName]
-
-	// Send the restore request to the server.
-	res, _, _ := c.sendRequest(api.Request{
-		Action: api.ActionRestore,
-		Data:   selectedID,
-	})
-
-	// Display the result.
-	fmt.Println("Success:", res.Success)
-	fmt.Println("Message:", res.Message)
 }
-
 func (c *client) messagesMenu() {
 	ui.ClearScreen()
 	fmt.Println("---------------------------------")
