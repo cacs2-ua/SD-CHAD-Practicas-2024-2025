@@ -70,23 +70,45 @@ func uploadToGoogleDrive(filePath, folderID string) error {
 		return fmt.Errorf("error creating Google Drive service: %v", err)
 	}
 
-	// Abre el archivo para subirlo.
+	// Obtener el nombre del archivo.
+	fileName := filepath.Base(filePath)
+
+	// Buscar si el archivo ya existe en la carpeta de Google Drive.
+	query := fmt.Sprintf("name = '%s' and '%s' in parents and trashed = false", fileName, folderID)
+	fileList, err := srv.Files.List().Q(query).Fields("files(id, name)").Do()
+	if err != nil {
+		return fmt.Errorf("error searching for file in Google Drive: %v", err)
+	}
+
+	var fileID string
+	if len(fileList.Files) > 0 {
+		// Si el archivo ya existe, obtener su ID.
+		fileID = fileList.Files[0].Id
+	}
+
+	// Abrir el archivo local para subirlo.
 	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("error opening file for upload: %v", err)
 	}
 	defer file.Close()
 
-	// Crea los metadatos del archivo.
-	fileMetadata := &drive.File{
-		Name:    filepath.Base(filePath),
-		Parents: []string{folderID},
-	}
-
-	// Sube el archivo.
-	_, err = srv.Files.Create(fileMetadata).Media(file).Do()
-	if err != nil {
-		return fmt.Errorf("error uploading file to Google Drive: %v", err)
+	if fileID != "" {
+		// Si el archivo existe, actualizar su contenido.
+		_, err = srv.Files.Update(fileID, nil).Media(file).Do()
+		if err != nil {
+			return fmt.Errorf("error updating file in Google Drive: %v", err)
+		}
+	} else {
+		// Si el archivo no existe, crear uno nuevo.
+		fileMetadata := &drive.File{
+			Name:    fileName,
+			Parents: []string{folderID},
+		}
+		_, err = srv.Files.Create(fileMetadata).Media(file).Do()
+		if err != nil {
+			return fmt.Errorf("error uploading file to Google Drive: %v", err)
+		}
 	}
 
 	return nil
