@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"prac/pkg/api"
 	"prac/pkg/ui"
+	"strings"
 	"time"
 )
 
@@ -88,9 +89,9 @@ func (c *client) createPoll() {
 
 	fmt.Println("Éxito:", res.Success)
 	fmt.Println("Mensaje:", res.Message)
-	if res.Success {
+	/*if res.Success {
 		fmt.Println("ID de la encuesta:", res.Data)
-	}
+	}*/
 }
 
 // voteInPoll permite al usuario votar en una encuesta existente
@@ -109,9 +110,13 @@ func (c *client) voteInPoll() {
 		return
 	}
 
+	// Limpiar posibles caracteres problemáticos en el JSON
+	cleanData := strings.ReplaceAll(res.Data, "\u00a0", " ")
+
 	var polls []Poll
-	if err := json.Unmarshal([]byte(res.Data), &polls); err != nil {
+	if err := json.Unmarshal([]byte(cleanData), &polls); err != nil {
 		fmt.Println("Error al decodificar las encuestas:", err)
+		fmt.Println("Datos recibidos:", cleanData)
 		return
 	}
 
@@ -120,30 +125,34 @@ func (c *client) voteInPoll() {
 		return
 	}
 
+	// Filtrar encuestas activas
+	var activePolls []Poll
+	for _, poll := range polls {
+		if !poll.EndDate.Before(time.Now()) {
+			activePolls = append(activePolls, poll)
+		}
+	}
+
+	if len(activePolls) == 0 {
+		fmt.Println("No hay encuestas activas disponibles.")
+		return
+	}
+
 	// Mostrar las encuestas disponibles
 	fmt.Println("Encuestas disponibles:")
-	for i, poll := range polls {
-		// Verificar si la encuesta ha finalizado
-		if poll.EndDate.Before(time.Now()) {
-			continue // Saltar encuestas finalizadas
-		}
+	for i, poll := range activePolls {
 		fmt.Printf("%d. %s (finaliza el %s)\n", i+1, poll.Title, poll.EndDate.Format("02/01/2006 15:04"))
 	}
 
 	// Solicitar la elección del usuario
 	choice := ui.ReadInt("Selecciona una encuesta")
-	if choice < 1 || choice > len(polls) {
+	if choice < 1 || choice > len(activePolls) {
 		fmt.Println("Elección inválida.")
 		return
 	}
 
-	selectedPoll := polls[choice-1]
-
-	// Verificar si la encuesta ha finalizado
-	if selectedPoll.EndDate.Before(time.Now()) {
-		fmt.Println("Esta encuesta ha finalizado.")
-		return
-	}
+	selectedPoll := activePolls[choice-1]
+	fmt.Printf("Encuesta seleccionada: %s\n", selectedPoll.Title)
 
 	// Mostrar las opciones de voto
 	fmt.Println("Opciones de voto:")
@@ -162,11 +171,13 @@ func (c *client) voteInPoll() {
 
 	// Crear la estructura del voto
 	voteData := struct {
-		PollID string `json:"pollId"`
-		Option string `json:"option"`
+		PollID    string `json:"pollId"`
+		Option    string `json:"option"`
+		CreatedBy string `json:"createdBy"`
 	}{
-		PollID: selectedPoll.ID,
-		Option: selectedOption,
+		PollID:    selectedPoll.ID,
+		Option:    selectedOption,
+		CreatedBy: selectedPoll.CreatedBy,
 	}
 
 	// Serializar el voto
@@ -175,6 +186,9 @@ func (c *client) voteInPoll() {
 		fmt.Println("Error al serializar el voto:", err)
 		return
 	}
+
+	//fmt.Printf("Enviando voto para la encuesta con ID: %s, opción: %s\n", selectedPoll.ID, selectedOption)
+	fmt.Printf("Enviando voto para la encuesta: %s\n", selectedPoll.Title)
 
 	// Enviar la solicitud al servidor
 	voteRes, _, _ := c.sendRequest(api.Request{
@@ -192,6 +206,11 @@ func (c *client) viewResults() {
 	ui.ClearScreen()
 	fmt.Println("** Ver Resultados de Encuestas **")
 
+	/*if c.currentUser == "" || c.authToken == "" {
+		fmt.Println("No has iniciado sesión. Por favor, inicia sesión primero.")
+		return
+	}*/
+
 	// Obtener la lista de encuestas
 	res, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionListPolls,
@@ -203,9 +222,13 @@ func (c *client) viewResults() {
 		return
 	}
 
+	// Limpiar posibles caracteres problemáticos en el JSON
+	cleanData := strings.ReplaceAll(res.Data, "\u00a0", " ")
+
 	var polls []Poll
-	if err := json.Unmarshal([]byte(res.Data), &polls); err != nil {
+	if err := json.Unmarshal([]byte(cleanData), &polls); err != nil {
 		fmt.Println("Error al decodificar las encuestas:", err)
+		fmt.Println("Datos recibidos:", cleanData)
 		return
 	}
 
@@ -245,9 +268,13 @@ func (c *client) viewResults() {
 		return
 	}
 
+	// Limpiar posibles caracteres problemáticos en el JSON
+	cleanResultsData := strings.ReplaceAll(resultsRes.Data, "\u00a0", " ")
+
 	var pollResults Poll
-	if err := json.Unmarshal([]byte(resultsRes.Data), &pollResults); err != nil {
+	if err := json.Unmarshal([]byte(cleanResultsData), &pollResults); err != nil {
 		fmt.Println("Error al decodificar los resultados:", err)
+		fmt.Println("Datos recibidos:", cleanResultsData)
 		return
 	}
 
