@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"prac/pkg/api"
@@ -24,6 +25,7 @@ type Poll struct {
 	Votes     map[string]int `json:"votes"`
 	EndDate   time.Time      `json:"endDate"`
 	CreatedBy string         `json:"createdBy"`
+	Tags      []string       `json:"tags"`
 }
 
 // UserVote registra que un usuario ha votado en una encuesta específica
@@ -65,12 +67,18 @@ func (s *serverImpl) handleCreatePoll(req api.Request, providedAccessToken strin
 		return api.Response{Success: false, Message: "La fecha de finalización debe ser en el futuro"}
 	}
 
+	// Validar y limitar los hashtags a un máximo de 3
+	if len(poll.Tags) > 3 {
+		return api.Response{Success: false, Message: "La encuesta no puede tener más de 3 hashtags"}
+	}
+	for i, tag := range poll.Tags {
+		if !strings.HasPrefix(tag, "#") {
+			poll.Tags[i] = "#" + tag // Asegurarse de que cada hashtag comience con #
+		}
+	}
+
 	// Generar ID único y cifrarlo
 	pollUUID := uuid.New().String()
-	/*pollUUID, err := s.lookupUUIDFromUsername(poll.CreatedBy)
-	if err != nil {
-		return api.Response{Success: false, Message: err.Error()}
-	}*/
 	encryptedPollID, err := crypto.EncryptUUID(pollUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error al cifrar el ID de la encuesta"}
@@ -92,19 +100,11 @@ func (s *serverImpl) handleCreatePoll(req api.Request, providedAccessToken strin
 	}
 
 	// Guardar encuesta en la base de datos
-	keyPollID := store.HashBytes([]byte(pollUUID)) // Se guarda usando el hash del ID original
-
+	keyPollID := store.HashBytes([]byte(pollUUID))
 	if err := s.db.Put(bucketPolls, keyPollID, pollData); err != nil {
 		return api.Response{Success: false, Message: "Error al guardar la encuesta: " + err.Error()}
 	}
 
-	// Confirmar guardado
-	_, err = s.db.Get(bucketPolls, keyPollID)
-	if err != nil {
-		return api.Response{Success: false, Message: "Error al verificar la encuesta guardada: " + err.Error()}
-	}
-
-	// Respuesta con ID cifrado
 	return api.Response{
 		Success: true,
 		Message: "Encuesta creada correctamente",
@@ -271,19 +271,8 @@ func (s *serverImpl) handleListPolls(req api.Request, providedAccessToken string
 		return api.Response{Success: false, Message: "Error al obtener las encuestas: " + err.Error()}
 	}
 
-	//fmt.Printf("🔍 Claves encontradas en bucketPolls: %d\n", len(pollKeys))
-
 	var polls []Poll
 	for _, key := range pollKeys {
-		//fmt.Printf("Intentando recuperar clave: %x\n", key)
-
-		/*decryptedUUID, err := s.lookupUUIDFromUsername(req.Username)
-		if err != nil {
-			return api.Response{Success: false, Message: "User not found"}
-		}*/
-		//decryptedUUID, _ := crypto.DecryptUUID(string(key))
-		//keyUUID := store.HashBytes([]byte(decryptedUUID))
-
 		pollData, err := s.db.Get(bucketPolls, key)
 		if err != nil {
 			fmt.Printf("⚠️ Error al recuperar encuesta con clave %x: %v\n", key, err)
@@ -295,8 +284,6 @@ func (s *serverImpl) handleListPolls(req api.Request, providedAccessToken string
 			fmt.Printf("⚠️ Error al decodificar encuesta con clave %x: %v\n", key, err)
 			continue
 		}
-
-		//fmt.Printf("✅ Encuesta recuperada: %s\n", poll.Title)
 
 		polls = append(polls, poll)
 	}
