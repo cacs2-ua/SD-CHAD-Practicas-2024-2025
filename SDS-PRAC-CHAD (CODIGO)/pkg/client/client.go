@@ -203,8 +203,8 @@ func (c *client) registerUser() {
 		fmt.Println("Username cannot be empty")
 		return
 	}
-	if len(username) < 8 {
-		fmt.Println("Username must have at least 8 characters")
+	if len(username) < 4 {
+		fmt.Println("Username must have at least 4 characters")
 		return
 	}
 

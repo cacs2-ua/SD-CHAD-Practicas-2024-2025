@@ -170,6 +170,12 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("error opening database: %v", err)
 	}
+
+	// Create default users (admin and moderator) if they do not exist
+	if err := createDefaultUsers(db); err != nil {
+		log.Printf("Error creating default users: %v", err)
+	}
+
 	// Create the messages bucket if it does not exist
 	bs, ok := db.(*store.BboltStore)
 	if !ok {
@@ -333,8 +339,8 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if req.Username == "" || req.Password == "" || req.Email == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
-	if len(req.Username) < 8 {
-		return api.Response{Success: false, Message: "Username must have at least 8 characters"}
+	if len(req.Username) < 4 {
+		return api.Response{Success: false, Message: "Username must have at least 4 characters"}
 	}
 	if len(req.Password) < 8 {
 		return api.Response{Success: false, Message: "Password must have at least 8 characters"}
@@ -393,6 +399,11 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error initializing user data"}
 	}
 
+	// Assign role "normal" for a user registering using the default registration
+	if err := s.db.Put("cheese_roles", keyUUID, []byte("normal")); err != nil {
+		return api.Response{Success: false, Message: "Error saving user role: " + err.Error()}
+	}
+
 	// Generate RSA key pair for messaging
 	if err := functionalities.GenerateKeyPair(req.Username); err != nil {
 		return api.Response{Success: false, Message: "Error generating key pair for messaging: " + err.Error()}
@@ -403,6 +414,89 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	}
 
 	return api.Response{Success: true, Message: "User registered"}
+}
+
+func createDefaultUsers(db store.Store) error {
+	// Define default users data in an array of structs (email, username, password, role)
+	defaultUsers := []struct {
+		email    string
+		username string
+		password string
+		role     string
+	}{
+		{"admin1@gmail.com", "admin1", "admin1admin1", "admin"},
+		{"moderator1@gmail.com", "moderator1", "moderator1", "moderator"},
+	}
+
+	for _, user := range defaultUsers {
+		// Check if user already exists by email (using hashed email as key)
+		keyEmail := store.HashBytes([]byte(user.email))
+		if _, err := db.Get("cheese_auth_uuid", keyEmail); err == nil {
+			// User exists, continue to next user
+			continue
+		}
+
+		// Create user following existing registration logic
+		userUUID := uuid.New().String()
+		encryptedUUID, err := crypto.EncryptUUID(userUUID)
+		if err != nil {
+			return fmt.Errorf("error encrypting UUID for %s: %v", user.email, err)
+		}
+
+		// Hash the password using SHA3-256
+		hasher := sha3.New256()
+		hasher.Write([]byte(user.password))
+		hashedPassword := hex.EncodeToString(hasher.Sum(nil))
+
+		encryptedUsername, err := crypto.EncryptUsername(user.username)
+		if err != nil {
+			return fmt.Errorf("error encrypting username for %s: %v", user.email, err)
+		}
+
+		keyUUID := store.HashBytes([]byte(userUUID))
+		keyUsername := store.HashBytes([]byte(user.username))
+
+		// Save the cypher for the hashed UUID
+		encryptedCypher, err := crypto.EncryptServer(keyUUID)
+		if err != nil {
+			return fmt.Errorf("error encrypting cypher UUID for %s: %v", user.email, err)
+		}
+		if err := db.Put("cheese_auth_cipher_hashed_uuid", keyUUID, []byte(encryptedCypher)); err != nil {
+			return fmt.Errorf("error saving cypher UUID for %s: %v", user.email, err)
+		}
+		if err := db.Put("cheese_auth_uuid", keyEmail, []byte(encryptedUUID)); err != nil {
+			return fmt.Errorf("error saving encrypted UUID for %s: %v", user.email, err)
+		}
+		if err := db.Put("cheese_auth_email", keyUUID, keyEmail); err != nil {
+			return fmt.Errorf("error saving hashed email for %s: %v", user.email, err)
+		}
+		if err := db.Put("cheese_auth_password", keyUUID, []byte(hashedPassword)); err != nil {
+			return fmt.Errorf("error saving hashed password for %s: %v", user.email, err)
+		}
+		if err := db.Put("cheese_auth_username", keyUUID, []byte(encryptedUsername)); err != nil {
+			return fmt.Errorf("error saving encrypted username for %s: %v", user.email, err)
+		}
+		if err := db.Put("cheese_auth_username_email", keyUsername, keyEmail); err != nil {
+			return fmt.Errorf("error saving username-email mapping for %s: %v", user.email, err)
+		}
+		if err := db.Put("cheese_userdata", keyUUID, []byte("")); err != nil {
+			return fmt.Errorf("error initializing user data for %s: %v", user.email, err)
+		}
+		// Save role for the user in the "cheese_roles" bucket
+		if err := db.Put("cheese_roles", keyUUID, []byte(user.role)); err != nil {
+			return fmt.Errorf("error saving role for %s: %v", user.email, err)
+		}
+
+		// Generate RSA key pair for messaging (public key encryption)
+		if err := functionalities.GenerateKeyPair(user.username); err != nil {
+			return fmt.Errorf("error generating key pair for default user %s: %v", user.email, err)
+		}
+		// Generate the public key authentication key pair for the user
+		if err := functionalities.GenerateAuthKeyPair(db, user.username, userUUID); err != nil {
+			return fmt.Errorf("error generating auth key pair for default user %s: %v", user.email, err)
+		}
+	}
+	return nil
 }
 
 // lookupUUIDFromUsername obtains the user's UUID by using the following chain:
@@ -425,7 +519,6 @@ func (s *serverImpl) lookupUUIDFromUsername(username string) (string, error) {
 	return decryptedUUID, nil
 }
 
-// loginUser uses email and password to login.
 func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 	if req.Email == "" || req.Password == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}, "", ""
