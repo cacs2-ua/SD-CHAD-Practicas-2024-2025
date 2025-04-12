@@ -321,6 +321,7 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res = s.handleViewResults(req, providedAccessToken)
 	case api.ActionListPolls:
 		res = s.handleListPolls(req, providedAccessToken)
+	// Admin handlers
 	case api.ActionBanUser:
 		res = s.banUser(req)
 	case api.ActionUnbanUser:
