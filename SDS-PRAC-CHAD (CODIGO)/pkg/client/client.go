@@ -108,7 +108,6 @@ func (c *client) runLoop() {
 		// Generate options dynamically based on login state.
 		var options []string
 		if c.currentUser == "" {
-			// Not logged in: Register, Login, Exit
 			// Not logged in: Register, Login, Login with public key, Exit
 			options = []string{
 				"Register user",
@@ -117,18 +116,46 @@ func (c *client) runLoop() {
 				"Exit",
 			}
 		} else {
-			// Logged in: View data, Update data, Logout, Exit
-			options = []string{
-				"View data",
-				"Update data",
-				"Vote in a poll",
-				"Create a poll",
-				"View results",
-				"Logout",
-				"Exit",
-				"Create Backup",
-				"Restore Backup",
-				"Messages",
+			// Logged in: Generate menu based on role
+			switch c.currentRole {
+			case "normal":
+				options = []string{
+					"View data",
+					"Update data",
+					"Vote in a poll",
+					"View results",
+					"Messages",
+					"Logout",
+					"Exit",
+				}
+			case "admin":
+				options = []string{
+					"View data",
+					"Update data",
+					"Vote in a poll",
+					"Create a poll",
+					"Modify a poll",
+					"View results",
+					"Create Backup",
+					"Restore Backup",
+					"Messages",
+					"Logout",
+					"Exit",
+				}
+			case "moderator":
+				options = []string{
+					"View data",
+					"Update data",
+					"Vote in a poll",
+					"View results",
+					"Ban/Unban Users",
+					"Messages",
+					"Logout",
+					"Exit",
+				}
+			default:
+				fmt.Println("Unknown role. Please contact support.")
+				return
 			}
 		}
 
@@ -137,7 +164,6 @@ func (c *client) runLoop() {
 
 		// Map the chosen option based on login state.
 		if c.currentUser == "" {
-			// Not logged in.
 			// Not logged in.
 			switch choice {
 			case 1:
@@ -153,31 +179,73 @@ func (c *client) runLoop() {
 			}
 
 		} else {
-			// Logged in.
-			switch choice {
-			case 1:
-				c.fetchData()
-			case 2:
-				c.updateData()
-			case 3:
-				c.voteInPoll()
-			case 4:
-				c.createPoll()
-			case 5:
-				c.viewResults()
-			case 6:
-				c.logoutUser()
-			case 7:
-				// Exit option.
-				c.log.Println("Exiting client...")
-				return
-			case 8:
-				// Create a backup of the database file.
-				c.createBackup()
-			case 9:
-				c.restoreBackupFromDrive()
-			case 10:
-				c.messagesMenu()
+			// Logged in: Handle actions based on role.
+			switch c.currentRole {
+			case "normal":
+				switch choice {
+				case 1:
+					c.fetchData()
+				case 2:
+					c.updateData()
+				case 3:
+					c.voteInPoll()
+				case 4:
+					c.viewResults()
+				case 5:
+					c.messagesMenu()
+				case 6:
+					c.logoutUser()
+				case 7:
+					c.log.Println("Exiting client...")
+					return
+				}
+			case "admin":
+				switch choice {
+				case 1:
+					c.fetchData()
+				case 2:
+					c.updateData()
+				case 3:
+					c.voteInPoll()
+				case 4:
+					c.createPoll()
+				case 5:
+					//c.modifyPoll()
+					return
+				case 6:
+					c.viewResults()
+				case 7:
+					c.createBackup()
+				case 8:
+					c.restoreBackupFromDrive()
+				case 9:
+					c.messagesMenu()
+				case 10:
+					c.logoutUser()
+				case 11:
+					c.log.Println("Exiting client...")
+					return
+				}
+			case "moderator":
+				switch choice {
+				case 1:
+					c.fetchData()
+				case 2:
+					c.updateData()
+				case 3:
+					c.voteInPoll()
+				case 4:
+					c.viewResults()
+				case 5:
+					c.banMenu()
+				case 6:
+					c.messagesMenu()
+				case 7:
+					c.logoutUser()
+				case 8:
+					c.log.Println("Exiting client...")
+					return
+				}
 			}
 		}
 
@@ -485,6 +553,8 @@ func (c *client) loginWithPublicKey() {
 			c.accessTokenExpiry = expiry
 		}
 		fmt.Println("Public key login successful. Tokens saved.")
+	} else {
+		return
 	}
 }
 
@@ -913,4 +983,106 @@ func (c *client) conversationView(recipient string) {
 			fmt.Println("Error sending message:", sendRes.Message)
 		}
 	}
+}
+
+// banMenu allows moderators to ban or unban users.
+func (c *client) banMenu() {
+	ui.ClearScreen()
+	fmt.Println("** Ban/Unban Users **")
+
+	options := []string{"Ban a user", "Unban a user", "Back"}
+	choice := ui.PrintMenu("Ban/Unban Menu", options)
+
+	switch choice {
+	case 1: // Ban a user
+		username := c.selectUser("Select a user to ban")
+		if username == "" {
+			fmt.Println("No user selected.")
+			return
+		}
+
+		// Check if the user is already banned
+		statusRes, _, _ := c.sendRequest(api.Request{
+			Action:   api.ActionCheckBanStatus,
+			Username: username,
+		})
+		if statusRes.Message == "User is banned" {
+			fmt.Printf("The user '%s' is already banned.\n", username)
+			return
+		}
+
+		// Proceed to ban the user
+		res, _, _ := c.sendRequest(api.Request{
+			Action:   api.ActionBanUser,
+			Username: username,
+		})
+		fmt.Println("Success:", res.Success)
+		fmt.Println("Message:", res.Message)
+
+	case 2: // Unban a user
+		username := c.selectUser("Select a user to unban")
+		if username == "" {
+			fmt.Println("No user selected.")
+			return
+		}
+
+		// Check if the user is not banned
+		statusRes, _, _ := c.sendRequest(api.Request{
+			Action:   api.ActionCheckBanStatus,
+			Username: username,
+		})
+		if statusRes.Message == "User is not banned" {
+			fmt.Printf("The user '%s' is not banned.\n", username)
+			return
+		}
+
+		// Proceed to unban the user
+		res, _, _ := c.sendRequest(api.Request{
+			Action:   api.ActionUnbanUser,
+			Username: username,
+		})
+		fmt.Println("Success:", res.Success)
+		fmt.Println("Message:", res.Message)
+
+	case 3: // Back
+		return
+	}
+}
+
+// Helper function to fetch and display a list of users for selection.
+func (c *client) selectUser(prompt string) string {
+	// Request the list of usernames from the server.
+	res, _, _ := c.sendRequest(api.Request{
+		Action: api.ActionGetUsernames,
+	})
+	if !res.Success {
+		fmt.Println("Error fetching usernames:", res.Message)
+		return ""
+	}
+
+	var usernames []string
+	if err := json.Unmarshal([]byte(res.Data), &usernames); err != nil {
+		fmt.Println("Error decoding usernames:", err)
+		return ""
+	}
+
+	if len(usernames) == 0 {
+		fmt.Println("No users available.")
+		return ""
+	}
+
+	// Display the list of users.
+	fmt.Println(prompt)
+	for i, name := range usernames {
+		fmt.Printf("%d. %s\n", i+1, name)
+	}
+
+	// Let the user select a user.
+	choice := ui.ReadInt("Select a user")
+	if choice < 1 || choice > len(usernames) {
+		fmt.Println("Invalid choice.")
+		return ""
+	}
+
+	return usernames[choice-1]
 }

@@ -22,6 +22,11 @@ const (
 	ActionVoteInPoll  = "voteInPoll"
 	ActionViewResults = "viewResults"
 	ActionListPolls   = "listPolls"
+
+	// Actions for banning users
+	ActionBanUser        = "banUser"
+	ActionUnbanUser      = "unbanUser"
+	ActionCheckBanStatus = "checkBanStatus"
 )
 
 // Request structure for communication between server and client.

@@ -182,6 +182,14 @@ func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (st
 	if err != nil {
 		return "", "", "", fmt.Errorf("error decrypting user UUID: %v", err)
 	}
+
+	// Check if the user is banned
+	keyUUID := store.HashBytes([]byte(userUUID))
+	_, err = db.Get("cheese_banned_users", keyUUID)
+	if err == nil {
+		return "", "", "", errors.New("user is banned")
+	}
+
 	// Retrieve auth public key using hashed userUUID.
 	encryptedData, err := db.Get("auth_public_keys", store.HashBytes([]byte(userUUID)))
 	if err != nil {
@@ -217,7 +225,6 @@ func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (st
 	}
 
 	// Retrieve the role of the user
-	keyUUID := store.HashBytes([]byte(userUUID))
 	role, err := db.Get("cheese_roles", keyUUID)
 	if err != nil {
 		return "", "", "", fmt.Errorf("error retrieving user role: %v", err)

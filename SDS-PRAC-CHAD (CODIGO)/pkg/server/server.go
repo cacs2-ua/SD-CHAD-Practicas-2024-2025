@@ -49,6 +49,7 @@ var bucketAuthUsername = "cheese_auth_username"
 var bucketAuthUsernameEmail = "cheese_auth_username_email"
 var bucketAuthCypherHashedUUID = "cheese_auth_cipher_hashed_uuid"
 var bucketMessages = "messages"
+var bucketBannedUsers = "cheese_banned_users"
 
 var (
 	privateKey ed25519.PrivateKey
@@ -320,6 +321,12 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res = s.handleViewResults(req, providedAccessToken)
 	case api.ActionListPolls:
 		res = s.handleListPolls(req, providedAccessToken)
+	case api.ActionBanUser:
+		res = s.banUser(req)
+	case api.ActionUnbanUser:
+		res = s.unbanUser(req)
+	case api.ActionCheckBanStatus:
+		res = s.checkUserBanStatus(req)
 	default:
 		res = api.Response{Success: false, Message: "Unknown action"}
 	}
@@ -555,6 +562,9 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 		return api.Response{Success: false, Message: "Invalid credentials"}, "", ""
 	}
 	decryptedUUID, err := crypto.DecryptUUID(string(encryptedUUID))
+	if s.isUserBanned(decryptedUUID) {
+		return api.Response{Success: false, Message: "User is banned"}, "", ""
+	}
 	if err != nil {
 		return api.Response{Success: false, Message: "Error decrypting UUID"}, "", ""
 	}
@@ -936,4 +946,60 @@ func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error encoding messages"}
 	}
 	return api.Response{Success: true, Message: "Messages retrieved", Data: string(data)}
+}
+
+// Ban a user by adding their UUID to the banned users bucket.
+func (s *serverImpl) banUser(req api.Request) api.Response {
+	if req.Username == "" {
+		return api.Response{Success: false, Message: "Missing username"}
+	}
+	userUUID, err := s.lookupUUIDFromUsername(req.Username)
+	if err != nil {
+		return api.Response{Success: false, Message: "User not found"}
+	}
+	keyUUID := store.HashBytes([]byte(userUUID))
+	if err := s.db.Put(bucketBannedUsers, keyUUID, []byte("banned")); err != nil {
+		return api.Response{Success: false, Message: "Error banning user: " + err.Error()}
+	}
+	return api.Response{Success: true, Message: "User banned successfully"}
+}
+
+// Unban a user by removing their UUID from the banned users bucket.
+func (s *serverImpl) unbanUser(req api.Request) api.Response {
+	if req.Username == "" {
+		return api.Response{Success: false, Message: "Missing username"}
+	}
+	userUUID, err := s.lookupUUIDFromUsername(req.Username)
+	if err != nil {
+		return api.Response{Success: false, Message: "User not found"}
+	}
+	keyUUID := store.HashBytes([]byte(userUUID))
+	if err := s.db.Delete(bucketBannedUsers, keyUUID); err != nil {
+		return api.Response{Success: false, Message: "Error unbanning user: " + err.Error()}
+	}
+	return api.Response{Success: true, Message: "User unbanned successfully"}
+}
+
+// Check if a user is banned.
+func (s *serverImpl) isUserBanned(userUUID string) bool {
+	keyUUID := store.HashBytes([]byte(userUUID))
+	_, err := s.db.Get(bucketBannedUsers, keyUUID)
+	return err == nil // If found, the user is banned.
+}
+
+// Check if a user is banned by looking up their UUID in the banned users bucket.
+func (s *serverImpl) checkUserBanStatus(req api.Request) api.Response {
+	if req.Username == "" {
+		return api.Response{Success: false, Message: "Missing username"}
+	}
+	userUUID, err := s.lookupUUIDFromUsername(req.Username)
+	if err != nil {
+		return api.Response{Success: false, Message: "User not found"}
+	}
+	keyUUID := store.HashBytes([]byte(userUUID))
+	_, err = s.db.Get(bucketBannedUsers, keyUUID)
+	if err == nil {
+		return api.Response{Success: true, Message: "User is banned"}
+	}
+	return api.Response{Success: true, Message: "User is not banned"}
 }
