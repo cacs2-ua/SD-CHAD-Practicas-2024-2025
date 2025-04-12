@@ -243,6 +243,7 @@ func (c *client) viewResults() {
 		status := "Activa"
 		if poll.EndDate.Before(time.Now()) {
 			status = "Finalizada"
+			//fmt.Printf("%d. %s\n", i+1, poll.Title)
 		}
 		fmt.Printf("%d. %s (%s)\n", i+1, poll.Title, status)
 	}
@@ -253,6 +254,10 @@ func (c *client) viewResults() {
 		fmt.Println("Elección inválida.")
 		return
 	}
+	/*if !polls[choice-1].EndDate.Before(time.Now()) { // No se puede ver los resultados de una encuesta no finalizada
+		fmt.Println("Elección inválida.")
+		return
+	}*/
 
 	selectedPoll := polls[choice-1]
 

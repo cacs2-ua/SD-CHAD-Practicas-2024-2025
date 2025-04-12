@@ -231,9 +231,14 @@ func (s *serverImpl) handleViewResults(req api.Request, providedAccessToken stri
 
 	// Obtener el ID de la encuesta
 	pollID := req.Data
+	key, erro := crypto.DecryptUUID(pollID)
+	if erro != nil {
+		return api.Response{Success: false, Message: "Error el desencriptar"}
+	}
+	keyUUID := store.HashBytes([]byte(key))
 
 	// Obtener la encuesta
-	pollData, err := s.db.Get(bucketPolls, []byte(pollID))
+	pollData, err := s.db.Get(bucketPolls, keyUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Encuesta no encontrada"}
 	}
@@ -256,7 +261,6 @@ func (s *serverImpl) handleViewResults(req api.Request, providedAccessToken stri
 	}
 }
 
-// handleListPolls obtiene la lista de todas las encuestas disponibles
 // handleListPolls obtiene la lista de todas las encuestas disponibles
 func (s *serverImpl) handleListPolls(req api.Request, providedAccessToken string) api.Response {
 	pollKeys, err := s.db.ListKeys(bucketPolls)
