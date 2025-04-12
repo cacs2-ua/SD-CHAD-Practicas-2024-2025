@@ -262,7 +262,7 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res, newAccessToken, newRefreshToken = s.loginUser(req)
 	case api.ActionPublicKeyLogin:
 		// Initiate public key login; req.Email must be provided
-		challenge, username, err := functionalities.InitiatePublicKeyLogin(s.db, req.Email)
+		challenge, username, role, err := functionalities.InitiatePublicKeyLogin(s.db, req.Email)
 		if err != nil {
 			res = api.Response{Success: false, Message: err.Error()}
 		} else {
@@ -270,17 +270,25 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 			dataObj := map[string]string{
 				"challenge": challenge,
 				"username":  username,
+				"role":      role,
 			}
 			dataBytes, _ := json.Marshal(dataObj)
 			res = api.Response{Success: true, Message: "Challenge generated", Data: string(dataBytes)}
 		}
 	case api.ActionPublicKeyLoginResponse:
 		// Verify public key login response; req.Email and req.Data (signature) are required
-		accessToken, refreshToken, err := functionalities.VerifyPublicKeyLogin(s.db, req.Email, req.Data)
+		accessToken, refreshToken, role, err := functionalities.VerifyPublicKeyLogin(s.db, req.Email, req.Data)
+		responseData := map[string]string{
+			"username": req.Email,
+			"role":     string(role),
+		}
+		responseJSON, _ := json.Marshal(responseData)
+
 		if err != nil {
 			res = api.Response{Success: false, Message: err.Error()}
 		} else {
-			res = api.Response{Success: true, Message: "Public key login successful"}
+
+			res = api.Response{Success: true, Message: "Public key login successful", Data: string(responseJSON)}
 			newAccessToken = accessToken
 			newRefreshToken = refreshToken
 		}
@@ -412,8 +420,20 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if err := functionalities.GenerateAuthKeyPair(s.db, req.Username, userUUID); err != nil {
 		return api.Response{Success: false, Message: "Error generating auth key pair: " + err.Error()}
 	}
+	role, err := s.db.Get("cheese_roles", keyUUID)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error retrieving user role"}
+	}
 
-	return api.Response{Success: true, Message: "User registered"}
+	// Incluir el rol en la respuesta
+	responseData := map[string]string{
+		"username": req.Username,
+		"role":     string(role),
+	}
+
+	responseJSON, _ := json.Marshal(responseData)
+
+	return api.Response{Success: true, Message: "User registered", Data: string(responseJSON)}
 }
 
 func createDefaultUsers(db store.Store) error {
@@ -568,9 +588,22 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 		return api.Response{Success: false, Message: "Error saving refresh token"}, "", ""
 	}
 
+	role, err := s.db.Get("cheese_roles", keyUUID)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error retrieving user role"}, "", ""
+	}
+
 	logging.Log("User " + username + " logged in successfully")
 
-	return api.Response{Success: true, Message: "Login successful", Data: username}, accessToken, refreshToken
+	// Incluir el rol en la respuesta
+	responseData := map[string]string{
+		"username": username,
+		"role":     string(role),
+	}
+
+	responseJSON, _ := json.Marshal(responseData)
+
+	return api.Response{Success: true, Message: "Login successful", Data: string(responseJSON)}, accessToken, refreshToken
 }
 
 // refreshToken validates the provided refresh token and rotates it.

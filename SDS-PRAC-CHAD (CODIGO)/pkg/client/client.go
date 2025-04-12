@@ -33,6 +33,7 @@ import (
 type client struct {
 	log               *log.Logger
 	currentUser       string
+	currentRole       string // Nuevo campo para almacenar el rol del usuario
 	authToken         string // access token
 	refreshToken      string // refresh token
 	accessTokenExpiry time.Time
@@ -101,7 +102,7 @@ func (c *client) runLoop() {
 		if c.currentUser == "" {
 			title = "Menu"
 		} else {
-			title = fmt.Sprintf("Menu (%s)", c.currentUser)
+			title = fmt.Sprintf("Menu (%s - %s)", c.currentUser, c.currentRole)
 		}
 
 		// Generate options dynamically based on login state.
@@ -252,12 +253,17 @@ func (c *client) registerUser() {
 		fmt.Println("Success:", resLogin.Success)
 		fmt.Println("Message:", resLogin.Message)
 		if resLogin.Success {
-			// Expecting the decrypted username in Data
-			if resLogin.Data != "" {
-				c.currentUser = resLogin.Data
-			} else {
-				c.currentUser = username
+			var responseData struct {
+				Username string `json:"username"`
+				Role     string `json:"role"`
 			}
+			if err := json.Unmarshal([]byte(res.Data), &responseData); err != nil {
+				fmt.Println("Error decoding response data:", err)
+				return
+			}
+
+			c.currentUser = responseData.Username
+			c.currentRole = responseData.Role
 			// Remove "Bearer " prefix if present.
 			if strings.HasPrefix(accessToken, "Bearer ") {
 				accessToken = accessToken[7:]
@@ -332,11 +338,18 @@ func (c *client) loginUser() {
 	// If login is successful, save currentUser and the tokens.
 	if res.Success {
 		// Expecting the decrypted username in Data
-		if res.Data != "" {
-			c.currentUser = res.Data
-		} else {
-			c.currentUser = email
+		var responseData struct {
+			Username string `json:"username"`
+			Role     string `json:"role"`
 		}
+		if err := json.Unmarshal([]byte(res.Data), &responseData); err != nil {
+			fmt.Println("Error decoding response data:", err)
+			return
+		}
+
+		c.currentUser = responseData.Username
+		c.currentRole = responseData.Role
+
 		if strings.HasPrefix(accessToken, "Bearer ") {
 			accessToken = accessToken[7:]
 		}
@@ -400,10 +413,14 @@ func (c *client) loginWithPublicKey() {
 	}
 	challenge, ok1 := dataObj["challenge"]
 	username, ok2 := dataObj["username"]
-	if !ok1 || !ok2 {
+	role, ok3 := dataObj["role"]
+	if !ok1 || !ok2 || !ok3 {
 		fmt.Println("Invalid challenge data received")
 		return
 	}
+
+	// Store the role temporarily
+	c.currentRole = role
 
 	// Load the auth private key from keys/users-auth/<username>/private.pem.
 	authPrivKey, err := functionalities.LoadAuthPrivateKey(username)
@@ -430,7 +447,18 @@ func (c *client) loginWithPublicKey() {
 	fmt.Println("Success:", resResp.Success)
 	fmt.Println("Message:", resResp.Message)
 	if resResp.Success {
-		c.currentUser = username
+		var responseData struct {
+			Username string `json:"username"`
+			Role     string `json:"role"`
+		}
+		if err := json.Unmarshal([]byte(res.Data), &responseData); err != nil {
+			fmt.Println("Error decoding response data:", err)
+			return
+		}
+
+		c.currentUser = responseData.Username
+		c.currentRole = responseData.Role
+
 		if strings.HasPrefix(accessToken, "Bearer ") {
 			accessToken = accessToken[7:]
 		}

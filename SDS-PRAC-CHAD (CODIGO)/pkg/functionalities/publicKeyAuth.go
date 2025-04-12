@@ -108,33 +108,41 @@ func GenerateAuthKeyPair(db store.Store, username, userUUID string) error {
 // It first retrieves the encrypted UUID from the "cheese_auth_uuid" bucket (keyed by hashed email),
 // then decrypts it to obtain the user UUID. Next, it retrieves the auth public key using the hashed user UUID.
 // Finally, it generates a nonce challenge, stores it, and returns the nonce and username.
-func InitiatePublicKeyLogin(db store.Store, email string) (string, string, error) {
+func InitiatePublicKeyLogin(db store.Store, email string) (string, string, string, error) {
 	// Retrieve encrypted UUID from bucketAuthUUID using hashed email.
 	encryptedUUID, err := db.Get(bucketAuthUUID, store.HashBytes([]byte(email)))
 	if err != nil {
-		return "", "", errors.New("user not found for public key login")
+		return "", "", "", errors.New("user not found for public key login")
 	}
 	userUUID, err := pcrypto.DecryptUUID(string(encryptedUUID))
 	if err != nil {
-		return "", "", fmt.Errorf("error decrypting user UUID: %v", err)
+		return "", "", "", fmt.Errorf("error decrypting user UUID: %v", err)
 	}
 	// Retrieve auth public key from "auth_public_keys" using hashed userUUID.
 	encryptedData, err := db.Get("auth_public_keys", store.HashBytes([]byte(userUUID)))
 	if err != nil {
-		return "", "", errors.New("auth public key not found")
+		return "", "", "", errors.New("auth public key not found")
 	}
 	decryptedData, err := pcrypto.DecryptServer(encryptedData)
 	if err != nil {
-		return "", "", fmt.Errorf("error decrypting auth key data: %v", err)
+		return "", "", "", fmt.Errorf("error decrypting auth key data: %v", err)
 	}
 	var authData AuthKeyData
 	if err := json.Unmarshal(decryptedData, &authData); err != nil {
-		return "", "", fmt.Errorf("error unmarshaling auth key data: %v", err)
+		return "", "", "", fmt.Errorf("error unmarshaling auth key data: %v", err)
 	}
+
+	// Retrieve the role of the user
+	keyUUID := store.HashBytes([]byte(userUUID))
+	role, err := db.Get("cheese_roles", keyUUID)
+	if err != nil {
+		return "", "", "", fmt.Errorf("error retrieving user role: %v", err)
+	}
+
 	// Generate nonce
 	nonceBytes := make([]byte, 16)
 	if _, err := rand.Read(nonceBytes); err != nil {
-		return "", "", fmt.Errorf("error generating nonce: %v", err)
+		return "", "", "", fmt.Errorf("error generating nonce: %v", err)
 	}
 	nonce := base64.StdEncoding.EncodeToString(nonceBytes)
 	nonceMu.Lock()
@@ -143,24 +151,24 @@ func InitiatePublicKeyLogin(db store.Store, email string) (string, string, error
 		Timestamp: time.Now(),
 	}
 	nonceMu.Unlock()
-	return nonce, authData.Username, nil
+	return nonce, authData.Username, string(role), nil
 }
 
 // VerifyPublicKeyLogin verifies the signature of the challenge for the given email.
 // It retrieves the encrypted UUID (using hashed email), decrypts it to obtain the user UUID,
 // then uses the hashed userUUID to access the auth public key.
 // If the signature is valid, it generates tokens and saves the refresh token in the DB.
-func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (string, string, error) {
+func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (string, string, string, error) {
 	nonceMu.Lock()
 	nInfo, exists := nonceMap[email]
 	if !exists {
 		nonceMu.Unlock()
-		return "", "", errors.New("no challenge found for this email")
+		return "", "", "", errors.New("no challenge found for this email")
 	}
 	if time.Since(nInfo.Timestamp) > 5*time.Minute {
 		delete(nonceMap, email)
 		nonceMu.Unlock()
-		return "", "", errors.New("challenge expired")
+		return "", "", "", errors.New("challenge expired")
 	}
 	delete(nonceMap, email)
 	nonceMu.Unlock()
@@ -168,61 +176,68 @@ func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (st
 	// Retrieve encrypted UUID using hashed email.
 	encryptedUUID, err := db.Get(bucketAuthUUID, store.HashBytes([]byte(email)))
 	if err != nil {
-		return "", "", errors.New("user not found for public key login")
+		return "", "", "", errors.New("user not found for public key login")
 	}
 	userUUID, err := pcrypto.DecryptUUID(string(encryptedUUID))
 	if err != nil {
-		return "", "", fmt.Errorf("error decrypting user UUID: %v", err)
+		return "", "", "", fmt.Errorf("error decrypting user UUID: %v", err)
 	}
 	// Retrieve auth public key using hashed userUUID.
 	encryptedData, err := db.Get("auth_public_keys", store.HashBytes([]byte(userUUID)))
 	if err != nil {
-		return "", "", errors.New("auth public key not found")
+		return "", "", "", errors.New("auth public key not found")
 	}
 	decryptedData, err := pcrypto.DecryptServer(encryptedData)
 	if err != nil {
-		return "", "", fmt.Errorf("error decrypting auth key data: %v", err)
+		return "", "", "", fmt.Errorf("error decrypting auth key data: %v", err)
 	}
 	var authData AuthKeyData
 	if err := json.Unmarshal(decryptedData, &authData); err != nil {
-		return "", "", fmt.Errorf("error unmarshaling auth key data: %v", err)
+		return "", "", "", fmt.Errorf("error unmarshaling auth key data: %v", err)
 	}
 	block, _ := pem.Decode([]byte(authData.PublicKey))
 	if block == nil {
-		return "", "", errors.New("failed to parse public key PEM")
+		return "", "", "", errors.New("failed to parse public key PEM")
 	}
 	pubInterface, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
-		return "", "", fmt.Errorf("error parsing public key: %v", err)
+		return "", "", "", fmt.Errorf("error parsing public key: %v", err)
 	}
 	pubKey, ok := pubInterface.(*rsa.PublicKey)
 	if !ok {
-		return "", "", errors.New("public key is not RSA")
+		return "", "", "", errors.New("public key is not RSA")
 	}
 	signature, err := base64.StdEncoding.DecodeString(signatureB64)
 	if err != nil {
-		return "", "", fmt.Errorf("error decoding signature: %v", err)
+		return "", "", "", fmt.Errorf("error decoding signature: %v", err)
 	}
 	hash := sha256.Sum256([]byte(nInfo.Nonce))
 	if err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hash[:], signature); err != nil {
-		return "", "", errors.New("signature verification failed")
+		return "", "", "", errors.New("signature verification failed")
 	}
+
+	// Retrieve the role of the user
+	keyUUID := store.HashBytes([]byte(userUUID))
+	role, err := db.Get("cheese_roles", keyUUID)
+	if err != nil {
+		return "", "", "", fmt.Errorf("error retrieving user role: %v", err)
+	}
+
 	// Generate tokens using the shared token functions
 	accessToken, err := token.GenerateAccessToken(userUUID)
 	if err != nil {
-		return "", "", fmt.Errorf("error generating access token: %v", err)
+		return "", "", "", fmt.Errorf("error generating access token: %v", err)
 	}
 	refreshToken, err := token.GenerateRefreshToken(userUUID)
 	if err != nil {
-		return "", "", fmt.Errorf("error generating refresh token: %v", err)
+		return "", "", "", fmt.Errorf("error generating refresh token: %v", err)
 	}
 	// Save the refresh token in the database so that auto-refresh works.
-	keyUUID := store.HashBytes([]byte(userUUID))
 	hashedRefresh := store.HashBytes([]byte(refreshToken))
 	if err := db.Put("cheese_refresh", keyUUID, hashedRefresh); err != nil {
-		return "", "", fmt.Errorf("error saving refresh token: %v", err)
+		return "", "", "", fmt.Errorf("error saving refresh token: %v", err)
 	}
-	return accessToken, refreshToken, nil
+	return accessToken, refreshToken, string(role), nil
 }
 
 // LoadAuthPrivateKey loads the auth private key from keys/users-auth/<username>/private.pem.
