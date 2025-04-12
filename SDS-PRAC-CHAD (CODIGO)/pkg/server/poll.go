@@ -110,30 +110,6 @@ func (s *serverImpl) handleCreatePoll(req api.Request, providedAccessToken strin
 
 // handleVoteInPoll permite a un usuario votar en una encuesta
 func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken string) api.Response {
-	/*if req.Username == "" || providedAccessToken == "" {
-		return api.Response{Success: false, Message: "No estás autenticado"}
-	}
-
-	// Verificar el token de acceso
-	if err != nil {
-		return api.Response{Success: false, Message: err.Error()}
-	}
-	if !s.isAccessTokenValid(decryptedUUID, providedAccessToken) {
-		return api.Response{Success: false, Message: "Token de acceso inválido o expirado"}
-	}*/
-
-	// Obtengo la clave del usuario
-	/*voteUUID := uuid.New().String()
-	//encryptedVoteID, err := crypto.EncryptUUID(voteUUID)
-	if err != nil {
-		return api.Response{Success: false, Message: "Error al cifrar el ID de la encuesta"}
-	}*/
-
-	decryptedUUID, err := s.lookupUUIDFromUsername(req.Username)
-	if err != nil {
-		return api.Response{Success: false, Message: "User not found"}
-	}
-	keyUUID := store.HashBytes([]byte(decryptedUUID))
 
 	// Decodificar los datos del voto
 	var voteData struct {
@@ -145,8 +121,11 @@ func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken strin
 		return api.Response{Success: false, Message: "Error al decodificar los datos del voto: " + err.Error()}
 	}
 
+	// La clave va a ser el ID de la encuesta + el username
+	voteKey := store.HashBytes([]byte(voteData.PollID + req.Username))
+
 	// Verificar si el usuario ya ha votado en esta encuesta
-	_, err = s.db.Get(bucketUserVotes, keyUUID)
+	_, err := s.db.Get(bucketUserVotes, voteKey)
 	if err == nil {
 		return api.Response{Success: false, Message: "Ya has votado en esta encuesta"}
 	}
@@ -204,14 +183,14 @@ func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken strin
 
 	// Registrar que el usuario ha votado en esta encuesta
 	userVote := UserVote{
-		UserID: decryptedUUID,
+		UserID: req.Username,
 		PollID: voteData.PollID,
 	}
 	userVoteData, err := json.Marshal(userVote)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error al serializar el registro de voto: " + err.Error()}
 	}
-	if err := s.db.Put(bucketUserVotes, keyUUID, userVoteData); err != nil {
+	if err := s.db.Put(bucketUserVotes, voteKey, userVoteData); err != nil {
 		return api.Response{Success: false, Message: "Error al registrar el voto: " + err.Error()}
 	}
 
