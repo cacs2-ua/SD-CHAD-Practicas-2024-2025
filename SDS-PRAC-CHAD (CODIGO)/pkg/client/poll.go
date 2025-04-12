@@ -159,15 +159,19 @@ func (c *client) voteInPoll() {
 	for i, option := range selectedPoll.Options {
 		fmt.Printf("%d. %s\n", i+1, option)
 	}
+	fmt.Println("0. Voto en blanco")
 
 	// Solicitar la opción de voto
 	optionChoice := ui.ReadInt("Selecciona una opción")
-	if optionChoice < 1 || optionChoice > len(selectedPoll.Options) {
+	if optionChoice < 0 || optionChoice > len(selectedPoll.Options) {
 		fmt.Println("Elección inválida.")
 		return
 	}
 
-	selectedOption := selectedPoll.Options[optionChoice-1]
+	selectedOption := ""
+	if optionChoice != 0 {
+		selectedOption = selectedPoll.Options[optionChoice-1]
+	}
 
 	// Crear la estructura del voto
 	voteData := struct {
@@ -243,6 +247,7 @@ func (c *client) viewResults() {
 		status := "Activa"
 		if poll.EndDate.Before(time.Now()) {
 			status = "Finalizada"
+			//fmt.Printf("%d. %s\n", i+1, poll.Title)
 		}
 		fmt.Printf("%d. %s (%s)\n", i+1, poll.Title, status)
 	}
@@ -253,6 +258,10 @@ func (c *client) viewResults() {
 		fmt.Println("Elección inválida.")
 		return
 	}
+	/*if !polls[choice-1].EndDate.Before(time.Now()) { // No se puede ver los resultados de una encuesta no finalizada
+		fmt.Println("Elección inválida.")
+		return
+	}*/
 
 	selectedPoll := polls[choice-1]
 

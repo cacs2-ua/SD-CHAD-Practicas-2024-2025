@@ -67,10 +67,6 @@ func (s *serverImpl) handleCreatePoll(req api.Request, providedAccessToken strin
 
 	// Generar ID único y cifrarlo
 	pollUUID := uuid.New().String()
-	/*pollUUID, err := s.lookupUUIDFromUsername(poll.CreatedBy)
-	if err != nil {
-		return api.Response{Success: false, Message: err.Error()}
-	}*/
 	encryptedPollID, err := crypto.EncryptUUID(pollUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error al cifrar el ID de la encuesta"}
@@ -114,24 +110,6 @@ func (s *serverImpl) handleCreatePoll(req api.Request, providedAccessToken strin
 
 // handleVoteInPoll permite a un usuario votar en una encuesta
 func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken string) api.Response {
-	/*if req.Username == "" || providedAccessToken == "" {
-		return api.Response{Success: false, Message: "No estás autenticado"}
-	}
-
-	// Verificar el token de acceso
-	if err != nil {
-		return api.Response{Success: false, Message: err.Error()}
-	}
-	if !s.isAccessTokenValid(decryptedUUID, providedAccessToken) {
-		return api.Response{Success: false, Message: "Token de acceso inválido o expirado"}
-	}*/
-
-	// Obtengo la clave del usuario
-	decryptedUUID, err := s.lookupUUIDFromUsername(req.Username)
-	if err != nil {
-		return api.Response{Success: false, Message: "User not found"}
-	}
-	keyUUID := store.HashBytes([]byte(decryptedUUID))
 
 	// Decodificar los datos del voto
 	var voteData struct {
@@ -143,8 +121,11 @@ func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken strin
 		return api.Response{Success: false, Message: "Error al decodificar los datos del voto: " + err.Error()}
 	}
 
+	// La clave va a ser el ID de la encuesta + el username
+	voteKey := store.HashBytes([]byte(voteData.PollID + req.Username))
+
 	// Verificar si el usuario ya ha votado en esta encuesta
-	_, err = s.db.Get(bucketUserVotes, keyUUID)
+	_, err := s.db.Get(bucketUserVotes, voteKey)
 	if err == nil {
 		return api.Response{Success: false, Message: "Ya has votado en esta encuesta"}
 	}
@@ -179,32 +160,37 @@ func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken strin
 			break
 		}
 	}
+	if voteData.Option == "" {
+		optionValid = true
+	}
 	if !optionValid {
 		return api.Response{Success: false, Message: "Opción de voto inválida"}
 	}
 
-	// Incrementar el contador de votos para la opción seleccionada
-	poll.Votes[voteData.Option]++
+	if voteData.Option != "" {
+		// Incrementar el contador de votos para la opción seleccionada
+		poll.Votes[voteData.Option]++
 
-	// Actualizar la encuesta en la base de datos
-	updatedPollData, err := json.Marshal(poll)
-	if err != nil {
-		return api.Response{Success: false, Message: "Error al serializar la encuesta actualizada: " + err.Error()}
-	}
-	if err := s.db.Put(bucketPolls, keyPoll, updatedPollData); err != nil {
-		return api.Response{Success: false, Message: "Error al actualizar la encuesta: " + err.Error()}
+		// Actualizar la encuesta en la base de datos
+		updatedPollData, err := json.Marshal(poll)
+		if err != nil {
+			return api.Response{Success: false, Message: "Error al serializar la encuesta actualizada: " + err.Error()}
+		}
+		if err := s.db.Put(bucketPolls, keyPoll, updatedPollData); err != nil {
+			return api.Response{Success: false, Message: "Error al actualizar la encuesta: " + err.Error()}
+		}
 	}
 
 	// Registrar que el usuario ha votado en esta encuesta
 	userVote := UserVote{
-		UserID: decryptedUUID,
+		UserID: req.Username,
 		PollID: voteData.PollID,
 	}
 	userVoteData, err := json.Marshal(userVote)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error al serializar el registro de voto: " + err.Error()}
 	}
-	if err := s.db.Put(bucketUserVotes, keyUUID, userVoteData); err != nil {
+	if err := s.db.Put(bucketUserVotes, voteKey, userVoteData); err != nil {
 		return api.Response{Success: false, Message: "Error al registrar el voto: " + err.Error()}
 	}
 
@@ -216,24 +202,17 @@ func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken strin
 
 // handleViewResults obtiene los resultados de una encuesta específica
 func (s *serverImpl) handleViewResults(req api.Request, providedAccessToken string) api.Response {
-	/*if req.Username == "" || providedAccessToken == "" {
-		return api.Response{Success: false, Message: "No estás autenticado"}
-	}
-
-	// Verificar el token de acceso
-	decryptedUUID, err := s.lookupUUIDFromUsername(req.Username)
-	if err != nil {
-		return api.Response{Success: false, Message: err.Error()}
-	}
-	if !s.isAccessTokenValid(decryptedUUID, providedAccessToken) {
-		return api.Response{Success: false, Message: "Token de acceso inválido o expirado"}
-	}*/
 
 	// Obtener el ID de la encuesta
 	pollID := req.Data
+	key, erro := crypto.DecryptUUID(pollID)
+	if erro != nil {
+		return api.Response{Success: false, Message: "Error el desencriptar"}
+	}
+	keyUUID := store.HashBytes([]byte(key))
 
 	// Obtener la encuesta
-	pollData, err := s.db.Get(bucketPolls, []byte(pollID))
+	pollData, err := s.db.Get(bucketPolls, keyUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Encuesta no encontrada"}
 	}
@@ -256,7 +235,6 @@ func (s *serverImpl) handleViewResults(req api.Request, providedAccessToken stri
 	}
 }
 
-// handleListPolls obtiene la lista de todas las encuestas disponibles
 // handleListPolls obtiene la lista de todas las encuestas disponibles
 func (s *serverImpl) handleListPolls(req api.Request, providedAccessToken string) api.Response {
 	pollKeys, err := s.db.ListKeys(bucketPolls)
