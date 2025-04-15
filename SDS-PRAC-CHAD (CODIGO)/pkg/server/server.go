@@ -215,6 +215,9 @@ func Run() error {
 	}
 	defer srv.db.Close()
 
+	srv.vaciabd(bs)
+	srv.seedPolls()
+
 	mux := http.NewServeMux()
 	mux.Handle("/api", http.HandlerFunc(srv.apiHandler))
 	err = http.ListenAndServeTLS(":9200", "certs/server.crt", "certs/server.key", mux)
