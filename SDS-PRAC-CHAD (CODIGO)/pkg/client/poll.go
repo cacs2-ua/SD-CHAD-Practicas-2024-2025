@@ -17,6 +17,7 @@ type Poll struct {
 	Votes     map[string]int `json:"votes"`
 	EndDate   time.Time      `json:"endDate"`
 	CreatedBy string         `json:"createdBy"`
+	Tags      []string       `json:"tags"`
 }
 
 // UserVote registra que un usuario ha votado en una encuesta específica
@@ -52,6 +53,20 @@ func (c *client) createPoll() {
 		options = append(options, option)
 	}
 
+	// Solicitar hashtags
+	var tags []string
+	fmt.Println("Introduce hasta 3 hashtags (deja en blanco para terminar):")
+	for len(tags) < 3 {
+		tag := ui.ReadInput(fmt.Sprintf("Hashtag %d (ejemplo: #politica):", len(tags)+1))
+		if tag == "" {
+			break
+		}
+		if !strings.HasPrefix(tag, "#") {
+			tag = "#" + tag // Asegurarse de que comience con #
+		}
+		tags = append(tags, tag)
+	}
+
 	// Solicitar fecha de finalización
 	fmt.Println("Introduce la fecha de finalización (formato: DD/MM/YYYY):")
 	dateStr := ui.ReadInput("Fecha")
@@ -71,6 +86,7 @@ func (c *client) createPoll() {
 		Options:   options,
 		EndDate:   endDate,
 		CreatedBy: c.currentUser,
+		Tags:      tags,
 	}
 
 	// Serializar la encuesta
@@ -142,6 +158,9 @@ func (c *client) voteInPoll() {
 	fmt.Println("Encuestas disponibles:")
 	for i, poll := range activePolls {
 		fmt.Printf("%d. %s (finaliza el %s)\n", i+1, poll.Title, poll.EndDate.Format("02/01/2006 15:04"))
+		if len(poll.Tags) > 0 {
+			fmt.Printf("   Hashtags: %s\n", strings.Join(poll.Tags, ", "))
+		}
 	}
 
 	// Solicitar la elección del usuario
@@ -190,9 +209,6 @@ func (c *client) voteInPoll() {
 		fmt.Println("Error al serializar el voto:", err)
 		return
 	}
-
-	//fmt.Printf("Enviando voto para la encuesta con ID: %s, opción: %s\n", selectedPoll.ID, selectedOption)
-	fmt.Printf("Enviando voto para la encuesta: %s\n", selectedPoll.Title)
 
 	// Enviar la solicitud al servidor
 	voteRes, _, _ := c.sendRequest(api.Request{
