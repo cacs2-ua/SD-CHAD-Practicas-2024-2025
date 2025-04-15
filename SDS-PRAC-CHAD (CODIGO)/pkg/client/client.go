@@ -119,7 +119,6 @@ func (c *client) runLoop() {
 				"Exit",
 			}
 		} else {
-<<<<<<< HEAD
 			// Logged in: Generate menu based on role
 			switch c.currentRole {
 			case "normal":
@@ -143,6 +142,7 @@ func (c *client) runLoop() {
 					"Create Backup",
 					"Restore Backup",
 					"Messages",
+					"View Logs",
 					"Logout",
 					"Exit",
 				}
@@ -154,27 +154,13 @@ func (c *client) runLoop() {
 					"View results",
 					"Ban/Unban Users",
 					"Messages",
+					"View Logs",
 					"Logout",
 					"Exit",
 				}
 			default:
 				fmt.Println("Unknown role. Please contact support.")
 				return
-=======
-			// Logged in: View data, Update data, Logout, Exit
-			options = []string{
-				"View data",
-				"Update data",
-				"Vote in a poll",
-				"Create a poll",
-				"View results",
-				"Logout",
-				"Exit",
-				"Create Backup",
-				"Restore Backup",
-				"Messages",
-				"View Logs",
->>>>>>> alvaro
 			}
 		}
 
@@ -198,7 +184,6 @@ func (c *client) runLoop() {
 			}
 
 		} else {
-<<<<<<< HEAD
 			// Logged in: Handle actions based on role.
 			switch c.currentRole {
 			case "normal":
@@ -241,8 +226,10 @@ func (c *client) runLoop() {
 				case 9:
 					c.messagesMenu()
 				case 10:
-					c.logoutUser()
+					c.viewLogs()
 				case 11:
+					c.logoutUser()
+				case 12:
 					c.log.Println("Exiting client...")
 					return
 				}
@@ -261,41 +248,13 @@ func (c *client) runLoop() {
 				case 6:
 					c.messagesMenu()
 				case 7:
-					c.logoutUser()
+					c.viewLogs()
 				case 8:
+					c.logoutUser()
+				case 9:
 					c.log.Println("Exiting client...")
 					return
 				}
-=======
-			// Logged in.
-			switch choice {
-			case 1:
-				c.fetchData()
-			case 2:
-				c.updateData()
-			case 3:
-				c.voteInPoll()
-			case 4:
-				c.createPoll()
-			case 5:
-				c.viewResults()
-			case 6:
-				c.logoutUser()
-			case 7:
-				// Exit option.
-				c.log.Println("Exiting client...")
-				return
-			case 8:
-				// Create a backup of the database file.
-				c.createBackup()
-			case 9:
-				c.restoreBackupFromDrive()
-			case 10:
-				c.messagesMenu()
-			case 11:
-				// View logs
-				c.viewLogs()
->>>>>>> alvaro
 			}
 
 		}
@@ -1052,7 +1011,95 @@ func (c *client) conversationView(recipient string) {
 	}
 }
 
-<<<<<<< HEAD
+func (c *client) viewLogs() {
+	ui.ClearScreen()
+	fmt.Println("** Ver Logs **")
+
+	credentialsPath := "keys/credentials.json"           // Ruta al archivo JSON con las credenciales.
+	driveFolderID := "1ka0Ec2EnHcF2qrvk9nsaSpI124jkLMwj" // ID de la carpeta de Google Drive.
+
+	// Listar los logs disponibles en Google Drive.
+	files, err := listBackupsFromGoogleDrive(driveFolderID, credentialsPath)
+
+	// Filtrar solo los archivos con extensión .enc
+	filteredFiles := make(map[string]string)
+	for name, id := range files {
+		if strings.HasSuffix(name, ".enc") {
+			filteredFiles[name] = id
+		}
+	}
+	files = filteredFiles
+
+	if err != nil {
+		fmt.Println("Error al listar los logs:", err)
+		return
+	}
+
+	if len(files) == 0 {
+		fmt.Println("No hay logs disponibles en Google Drive.")
+		return
+	}
+
+	fmt.Println("Logs disponibles:")
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	for i, name := range names {
+		fmt.Printf("%d. %s\n", i+1, name)
+	}
+	fmt.Println("Selecciona un log para ver su contenido o presiona 'q' para volver al menú principal.")
+
+	// Solicitar la elección del usuario.
+	for {
+		input := ui.ReadInput("Selecciona un log (o 'q' para salir)")
+		if strings.ToLower(input) == "q" {
+			fmt.Println("Volviendo al menú principal...")
+			return
+		}
+
+		choice, err := strconv.Atoi(input)
+		if err != nil || choice < 1 || choice > len(names) {
+			fmt.Println("Elección inválida. Por favor, selecciona un número válido o 'q' para salir.")
+			continue
+		}
+
+		selectedName := names[choice-1]
+		selectedID := files[selectedName]
+
+		// Descargar el log desde Google Drive.
+		tempFilePath := filepath.Join(os.TempDir(), selectedName)
+		if err := logging.DownloadLogFromGoogleDrive(selectedID, tempFilePath, credentialsPath); err != nil {
+			fmt.Println("Error al descargar el log:", err)
+			return
+		}
+
+		// Desencriptar el log.
+		decryptedFilePath := tempFilePath + ".dec"
+		if err := logging.DecryptFile(tempFilePath, decryptedFilePath, "keys/logs_encryption.key"); err != nil {
+			fmt.Println("Error al desencriptar el log:", err)
+			return
+		}
+
+		// Mostrar el contenido del log.
+		content, err := os.ReadFile(decryptedFilePath)
+		if err != nil {
+			fmt.Println("Error al leer el log desencriptado:", err)
+			return
+		}
+
+		fmt.Println("\nContenido del log:")
+		fmt.Println(string(content))
+		fmt.Println("\nPresiona 'q' para volver al menú principal.")
+		ui.ReadInput("")
+
+		// Limpiar archivos temporales.
+		os.Remove(tempFilePath)
+		os.Remove(decryptedFilePath)
+		return
+	}
+}
+
 // banMenu allows moderators to ban or unban users.
 func (c *client) banMenu() {
 	ui.ClearScreen()
@@ -1154,93 +1201,3 @@ func (c *client) selectUser(prompt string) string {
 
 	return usernames[choice-1]
 }
-=======
-func (c *client) viewLogs() {
-	ui.ClearScreen()
-	fmt.Println("** Ver Logs **")
-
-	credentialsPath := "keys/credentials.json"           // Ruta al archivo JSON con las credenciales.
-	driveFolderID := "1ka0Ec2EnHcF2qrvk9nsaSpI124jkLMwj" // ID de la carpeta de Google Drive.
-
-	// Listar los logs disponibles en Google Drive.
-	files, err := listBackupsFromGoogleDrive(driveFolderID, credentialsPath)
-
-	// Filtrar solo los archivos con extensión .enc
-	filteredFiles := make(map[string]string)
-	for name, id := range files {
-		if strings.HasSuffix(name, ".enc") {
-			filteredFiles[name] = id
-		}
-	}
-	files = filteredFiles
-
-	if err != nil {
-		fmt.Println("Error al listar los logs:", err)
-		return
-	}
-
-	if len(files) == 0 {
-		fmt.Println("No hay logs disponibles en Google Drive.")
-		return
-	}
-
-	fmt.Println("Logs disponibles:")
-	names := make([]string, 0, len(files))
-	for name := range files {
-		names = append(names, name)
-	}
-	for i, name := range names {
-		fmt.Printf("%d. %s\n", i+1, name)
-	}
-	fmt.Println("Selecciona un log para ver su contenido o presiona 'q' para volver al menú principal.")
-
-	// Solicitar la elección del usuario.
-	for {
-		input := ui.ReadInput("Selecciona un log (o 'q' para salir)")
-		if strings.ToLower(input) == "q" {
-			fmt.Println("Volviendo al menú principal...")
-			return
-		}
-
-		choice, err := strconv.Atoi(input)
-		if err != nil || choice < 1 || choice > len(names) {
-			fmt.Println("Elección inválida. Por favor, selecciona un número válido o 'q' para salir.")
-			continue
-		}
-
-		selectedName := names[choice-1]
-		selectedID := files[selectedName]
-
-		// Descargar el log desde Google Drive.
-		tempFilePath := filepath.Join(os.TempDir(), selectedName)
-		if err := logging.DownloadLogFromGoogleDrive(selectedID, tempFilePath, credentialsPath); err != nil {
-			fmt.Println("Error al descargar el log:", err)
-			return
-		}
-
-		// Desencriptar el log.
-		decryptedFilePath := tempFilePath + ".dec"
-		if err := logging.DecryptFile(tempFilePath, decryptedFilePath, "keys/logs_encryption.key"); err != nil {
-			fmt.Println("Error al desencriptar el log:", err)
-			return
-		}
-
-		// Mostrar el contenido del log.
-		content, err := os.ReadFile(decryptedFilePath)
-		if err != nil {
-			fmt.Println("Error al leer el log desencriptado:", err)
-			return
-		}
-
-		fmt.Println("\nContenido del log:")
-		fmt.Println(string(content))
-		fmt.Println("\nPresiona 'q' para volver al menú principal.")
-		ui.ReadInput("")
-
-		// Limpiar archivos temporales.
-		os.Remove(tempFilePath)
-		os.Remove(decryptedFilePath)
-		return
-	}
-}
->>>>>>> alvaro
