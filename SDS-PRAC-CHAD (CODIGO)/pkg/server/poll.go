@@ -34,19 +34,6 @@ type UserVote struct {
 
 // handleCreatePoll crea una nueva encuesta con las opciones especificadas
 func (s *serverImpl) handleCreatePoll(req api.Request, providedAccessToken string) api.Response {
-	// Autenticación básica
-	/*if req.Username == "" || providedAccessToken == "" {
-		return api.Response{Success: false, Message: "No estás autenticado"}
-	}
-
-	// Obtener el UUID del usuario y validar el token
-	decryptedUUID, err := s.lookupUUIDFromUsername(req.Username)
-	if err != nil {
-		return api.Response{Success: false, Message: err.Error()}
-	}
-	if !s.isAccessTokenValid(decryptedUUID, providedAccessToken) {
-		return api.Response{Success: false, Message: "Token de acceso inválido o expirado"}
-	}*/
 
 	// Decodificar los datos de la encuesta desde el request
 	var poll Poll
@@ -253,14 +240,6 @@ func (s *serverImpl) handleListPolls(req api.Request, providedAccessToken string
 
 	var polls []Poll
 	for _, key := range pollKeys {
-		//fmt.Printf("Intentando recuperar clave: %x\n", key)
-
-		/*decryptedUUID, err := s.lookupUUIDFromUsername(req.Username)
-		if err != nil {
-			return api.Response{Success: false, Message: "User not found"}
-		}*/
-		//decryptedUUID, _ := crypto.DecryptUUID(string(key))
-		//keyUUID := store.HashBytes([]byte(decryptedUUID))
 
 		pollData, err := s.db.Get(bucketPolls, key)
 		if err != nil {

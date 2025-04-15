@@ -190,30 +190,14 @@ func Run() error {
 		return fmt.Errorf("error creating messages bucket: %v", err)
 	}
 
-	// Elimina los buckets de encuestas
-	/*err = bs.DB.Update(func(tx *bbolt.Tx) error {
-		// Elimina el bucket de encuestas
-		if err := tx.DeleteBucket(store.BucketName("polls")); err != nil && err != bbolt.ErrBucketNotFound {
-			return fmt.Errorf("error al eliminar bucket polls: %v", err)
-		}
-
-		// Elimina el bucket de votos de usuarios
-		if err := tx.DeleteBucket(store.BucketName("user_votes")); err != nil && err != bbolt.ErrBucketNotFound {
-			return fmt.Errorf("error al eliminar bucket user_votes: %v", err)
-		}
-
-		fmt.Println("Buckets de encuestas eliminados correctamente")
-		return nil
-	})
-	if err != nil {
-		log.Fatalf("Error: %v", err)
-	}*/
-
 	srv := &serverImpl{
 		db:  db,
 		log: log.New(os.Stdout, "[srv] ", log.LstdFlags),
 	}
 	defer srv.db.Close()
+
+	srv.vaciabd(bs)
+	srv.seedPolls()
 
 	mux := http.NewServeMux()
 	mux.Handle("/api", http.HandlerFunc(srv.apiHandler))
