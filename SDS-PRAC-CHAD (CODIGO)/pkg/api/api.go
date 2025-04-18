@@ -19,6 +19,7 @@ const (
 
 	//Actions for polls
 	ActionCreatePoll  = "createPoll"
+	ActionModifyPoll  = "modifyPoll"
 	ActionVoteInPoll  = "voteInPoll"
 	ActionViewResults = "viewResults"
 	ActionListPolls   = "listPolls"

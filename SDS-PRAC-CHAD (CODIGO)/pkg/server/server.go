@@ -299,6 +299,8 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 	// Poll handlers
 	case api.ActionCreatePoll:
 		res = s.handleCreatePoll(req, providedAccessToken)
+	case api.ActionModifyPoll:
+		res = s.handleModifyPoll(req, providedAccessToken)
 	case api.ActionVoteInPoll:
 		res = s.handleVoteInPoll(req, providedAccessToken)
 	case api.ActionViewResults:
@@ -938,14 +940,30 @@ func (s *serverImpl) banUser(req api.Request) api.Response {
 	if req.Username == "" {
 		return api.Response{Success: false, Message: "Missing username"}
 	}
+
+	// Lookup the user's UUID
 	userUUID, err := s.lookupUUIDFromUsername(req.Username)
 	if err != nil {
 		return api.Response{Success: false, Message: "User not found"}
 	}
+
+	// Check the user's role
 	keyUUID := store.HashBytes([]byte(userUUID))
+	role, err := s.db.Get("cheese_roles", keyUUID)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error retrieving user role"}
+	}
+
+	// Prevent banning admins or moderators
+	if string(role) == "admin" || string(role) == "moderator" {
+		return api.Response{Success: false, Message: "Cannot ban users with admin or moderator roles"}
+	}
+
+	// Proceed with banning the user
 	if err := s.db.Put(bucketBannedUsers, keyUUID, []byte("banned")); err != nil {
 		return api.Response{Success: false, Message: "Error banning user: " + err.Error()}
 	}
+
 	return api.Response{Success: true, Message: "User banned successfully"}
 }
 

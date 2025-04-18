@@ -110,6 +110,108 @@ func (c *client) createPoll() {
 	}*/
 }
 
+func (c *client) modifyPoll() {
+	ui.ClearScreen()
+	fmt.Println("** Modify Poll **")
+
+	// Request the list of polls from the server
+	res, _, _ := c.sendRequest(api.Request{
+		Action: api.ActionListPolls,
+	})
+
+	if !res.Success {
+		fmt.Println("Error fetching polls:", res.Message)
+		return
+	}
+
+	var polls []Poll
+	if err := json.Unmarshal([]byte(res.Data), &polls); err != nil {
+		fmt.Println("Error decoding polls:", err)
+		return
+	}
+
+	if len(polls) == 0 {
+		fmt.Println("No polls available to modify.")
+		return
+	}
+
+	// Display the list of polls
+	fmt.Println("Available polls to modify:")
+	for i, poll := range polls {
+		fmt.Printf("%d. %s (ends on %s)\n", i+1, poll.Title, poll.EndDate.Format("02/01/2006 15:04"))
+	}
+
+	// Ask the user to select a poll
+	choice := ui.ReadInt("Select a poll to modify")
+	if choice < 1 || choice > len(polls) {
+		fmt.Println("Invalid choice.")
+		return
+	}
+
+	selectedPoll := polls[choice-1]
+
+	// Show current data
+	fmt.Printf("Current title: %s\n", selectedPoll.Title)
+	fmt.Printf("Current options: %s\n", strings.Join(selectedPoll.Options, ", "))
+	fmt.Printf("Current end date: %s\n", selectedPoll.EndDate.Format("02/01/2006 15:04"))
+
+	// Ask for new data
+	newTitle := ui.ReadInput("New title (leave blank to keep):")
+	newOptions := []string{}
+	fmt.Println("Enter new options (leave blank to keep current options):")
+	for i := 1; ; i++ {
+		option := ui.ReadInput(fmt.Sprintf("Option %d", i))
+		if option == "" {
+			break
+		}
+		newOptions = append(newOptions, option)
+	}
+
+	// Validate that there are at least 2 options
+	if len(newOptions) > 0 && len(newOptions) < 2 {
+		fmt.Println("You must provide at least 2 options.")
+		return
+	}
+
+	newDateStr := ui.ReadInput("New end date (leave blank to keep):")
+
+	// Parse the new end date if provided
+	var newEndDate time.Time
+	var err error
+	if newDateStr != "" {
+		newEndDate, err = time.Parse("02/01/2006 15:04", newDateStr)
+		if err != nil {
+			fmt.Println("Invalid date format:", err)
+			return
+		}
+	}
+
+	// Create the updated poll structure
+	updatedPoll := Poll{
+		ID:      selectedPoll.ID,
+		Title:   newTitle,
+		Options: newOptions,
+		EndDate: newEndDate,
+	}
+
+	// Serialize the updated poll
+	updatedPollData, err := json.Marshal(updatedPoll)
+	if err != nil {
+		fmt.Println("Error serializing updated poll:", err)
+		return
+	}
+
+	// Send the request to the server
+	resUpdate, _, _ := c.sendRequest(api.Request{
+		Action:   api.ActionModifyPoll,
+		Username: c.currentUser,
+		Data:     string(updatedPollData),
+	})
+
+	fmt.Println("Success:", resUpdate.Success)
+	fmt.Println("Message:", resUpdate.Message)
+}
+
 // voteInPoll permite al usuario votar en una encuesta existente
 func (c *client) voteInPoll() {
 	ui.ClearScreen()

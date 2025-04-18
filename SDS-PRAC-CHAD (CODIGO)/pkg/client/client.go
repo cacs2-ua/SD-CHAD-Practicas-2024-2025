@@ -215,8 +215,7 @@ func (c *client) runLoop() {
 				case 4:
 					c.createPoll()
 				case 5:
-					//c.modifyPoll()
-					return
+					c.modifyPoll()
 				case 6:
 					c.viewResults()
 				case 7:

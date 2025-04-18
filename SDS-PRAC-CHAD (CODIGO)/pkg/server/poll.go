@@ -99,6 +99,64 @@ func (s *serverImpl) handleCreatePoll(req api.Request, providedAccessToken strin
 	}
 }
 
+func (s *serverImpl) handleModifyPoll(req api.Request, providedAccessToken string) api.Response {
+	// Decode the updated poll data from the request
+	var updatedPoll Poll
+	if err := json.Unmarshal([]byte(req.Data), &updatedPoll); err != nil {
+		return api.Response{Success: false, Message: "Error decoding poll data: " + err.Error()}
+	}
+
+	// Ensure the poll ID is provided
+	if updatedPoll.ID == "" {
+		return api.Response{Success: false, Message: "Poll ID is required"}
+	}
+
+	// Decrypt the poll ID
+	decryptedPollID, err := crypto.DecryptUUID(updatedPoll.ID)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error decrypting poll ID"}
+	}
+	keyPoll := store.HashBytes([]byte(decryptedPollID))
+
+	// Retrieve the existing poll
+	pollData, err := s.db.Get(bucketPolls, keyPoll)
+	if err != nil {
+		return api.Response{Success: false, Message: "Poll not found"}
+	}
+
+	var existingPoll Poll
+	if err := json.Unmarshal(pollData, &existingPoll); err != nil {
+		return api.Response{Success: false, Message: "Error decoding existing poll"}
+	}
+
+	// Update allowed fields
+	if updatedPoll.Title != "" {
+		existingPoll.Title = updatedPoll.Title
+	}
+	if len(updatedPoll.Options) > 0 {
+		existingPoll.Options = updatedPoll.Options
+	}
+	if !updatedPoll.EndDate.IsZero() {
+		if updatedPoll.EndDate.Before(time.Now()) {
+			return api.Response{Success: false, Message: "End date must be in the future"}
+		}
+		existingPoll.EndDate = updatedPoll.EndDate
+	}
+
+	// Serialize the updated poll
+	updatedPollData, err := json.Marshal(existingPoll)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error serializing updated poll"}
+	}
+
+	// Save the updated poll in the database
+	if err := s.db.Put(bucketPolls, keyPoll, updatedPollData); err != nil {
+		return api.Response{Success: false, Message: "Error saving updated poll"}
+	}
+
+	return api.Response{Success: true, Message: "Poll updated successfully"}
+}
+
 // handleVoteInPoll permite a un usuario votar en una encuesta
 func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken string) api.Response {
 
