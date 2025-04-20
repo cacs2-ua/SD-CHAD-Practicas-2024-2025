@@ -135,6 +135,7 @@ func (c *client) runLoop() {
 				options = []string{
 					"View data",
 					"Update data",
+					"Modify user role",
 					"Vote in a poll",
 					"Create a poll",
 					"Modify a poll",
@@ -211,24 +212,26 @@ func (c *client) runLoop() {
 				case 2:
 					c.updateData()
 				case 3:
-					c.voteInPoll()
+					c.modifyUserRole()
 				case 4:
-					c.createPoll()
+					c.voteInPoll()
 				case 5:
-					c.modifyPoll()
+					c.createPoll()
 				case 6:
-					c.viewResults()
+					c.modifyPoll()
 				case 7:
-					c.createBackup()
+					c.viewResults()
 				case 8:
-					c.restoreBackupFromDrive()
+					c.createBackup()
 				case 9:
-					c.messagesMenu()
+					c.restoreBackupFromDrive()
 				case 10:
-					c.viewLogs()
+					c.messagesMenu()
 				case 11:
-					c.logoutUser()
+					c.viewLogs()
 				case 12:
+					c.logoutUser()
+				case 13:
 					c.log.Println("Exiting client...")
 					return
 				}
@@ -1199,4 +1202,93 @@ func (c *client) selectUser(prompt string) string {
 	}
 
 	return usernames[choice-1]
+}
+
+func (c *client) modifyUserRole() {
+	ui.ClearScreen()
+	fmt.Println("** Modify User Role **")
+
+	// Request the list of users from the server
+	res, _, _ := c.sendRequest(api.Request{
+		Action: api.ActionGetUsernames,
+	})
+	if !res.Success {
+		fmt.Println("Error fetching usernames:", res.Message)
+		return
+	}
+
+	var usernames []string
+	if err := json.Unmarshal([]byte(res.Data), &usernames); err != nil {
+		fmt.Println("Error decoding usernames:", err)
+		return
+	}
+
+	if len(usernames) == 0 {
+		fmt.Println("No users available.")
+		return
+	}
+
+	// Display the list of users
+	fmt.Println("Available Users:")
+	for i, name := range usernames {
+		fmt.Printf("%d. %s\n", i+1, name)
+	}
+
+	// Ask the administrator to select a user
+	choice := ui.ReadInt("Select a user to modify their role")
+	if choice < 1 || choice > len(usernames) {
+		fmt.Println("Invalid choice.")
+		return
+	}
+	selectedUser := usernames[choice-1]
+
+	// Request the current role of the selected user
+	roleRes, _, _ := c.sendRequest(api.Request{
+		Action:   api.ActionFetchUserRole,
+		Username: selectedUser,
+	})
+	if !roleRes.Success {
+		fmt.Println("Error fetching user role:", roleRes.Message)
+		return
+	}
+	currentRole := roleRes.Data
+
+	// Check if the selected user is an admin
+	if currentRole == "admin" {
+		fmt.Printf("The user '%s' is an admin. You cannot modify their role.\n", selectedUser)
+		return
+	}
+
+	// Ask for the new role
+	fmt.Println("Available roles:")
+	fmt.Println("1. normal")
+	fmt.Println("2. moderator")
+	roleChoice := ui.ReadInt("Select the new role")
+	var newRole string
+	switch roleChoice {
+	case 1:
+		newRole = "normal"
+	case 2:
+		newRole = "moderator"
+	default:
+		fmt.Println("Invalid role choice.")
+		return
+	}
+
+	// Check if the selected role is the same as the current role
+	if newRole == currentRole {
+		fmt.Printf("The user '%s' already has the role '%s'. No changes were made.\n", selectedUser, currentRole)
+		return
+	}
+
+	// Send the request to the server to modify the role
+	resUpdate, _, _ := c.sendRequest(api.Request{
+		Action:   api.ActionModifyUserRole,
+		Username: selectedUser,
+		Data:     newRole,
+	})
+
+	// Display the result
+	fmt.Println("Success:", resUpdate.Success)
+	fmt.Println("Message:", resUpdate.Message)
 }

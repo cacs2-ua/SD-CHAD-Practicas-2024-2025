@@ -7,6 +7,8 @@ const (
 	ActionPublicKeyLoginResponse = "publicKeyLoginResponse"
 	ActionFetchData              = "fetchData"
 	ActionUpdateData             = "updateData"
+	ActionModifyUserRole         = "modifyUserRole"
+	ActionFetchUserRole          = "FetchUserRole"
 	ActionLogout                 = "logout"
 	ActionRefresh                = "refresh" // new action for token refresh
 	ActionBackup                 = "backup"  // new action for database backup

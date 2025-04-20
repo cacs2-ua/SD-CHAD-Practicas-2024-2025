@@ -283,6 +283,10 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res = s.fetchData(req, providedAccessToken)
 	case api.ActionUpdateData:
 		res = s.updateData(req, providedAccessToken)
+	case api.ActionModifyUserRole:
+		res = s.handleModifyUserRole(req, providedAccessToken)
+	case api.ActionFetchUserRole:
+		res = s.handleFetchUserRole(req)
 	case api.ActionLogout:
 		res = s.logoutUser(req, providedRefreshToken)
 	case api.ActionBackup:
@@ -1005,4 +1009,67 @@ func (s *serverImpl) checkUserBanStatus(req api.Request) api.Response {
 		return api.Response{Success: true, Message: "User is banned"}
 	}
 	return api.Response{Success: true, Message: "User is not banned"}
+}
+
+func (s *serverImpl) handleFetchUserRole(req api.Request) api.Response {
+	if req.Username == "" {
+		return api.Response{Success: false, Message: "Missing username"}
+	}
+
+	// Retrieve the user's UUID
+	userUUID, err := s.lookupUUIDFromUsername(req.Username)
+	if err != nil {
+		return api.Response{Success: false, Message: "User not found"}
+	}
+
+	// Retrieve the current role of the user
+	keyUUID := store.HashBytes([]byte(userUUID))
+	currentRole, err := s.db.Get("cheese_roles", keyUUID)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error retrieving user role"}
+	}
+
+	return api.Response{Success: true, Message: "User role retrieved", Data: string(currentRole)}
+}
+
+func (s *serverImpl) handleModifyUserRole(req api.Request, providedAccessToken string) api.Response {
+	if req.Username == "" || req.Data == "" {
+		return api.Response{Success: false, Message: "Missing username or role"}
+	}
+
+	// Verify that the provided role is valid
+	newRole := req.Data
+	if newRole != "normal" && newRole != "moderator" {
+		return api.Response{Success: false, Message: "Invalid role"}
+	}
+
+	// Retrieve the user's UUID
+	userUUID, err := s.lookupUUIDFromUsername(req.Username)
+	if err != nil {
+		return api.Response{Success: false, Message: "User not found"}
+	}
+
+	// Retrieve the current role of the user
+	keyUUID := store.HashBytes([]byte(userUUID))
+	currentRole, err := s.db.Get("cheese_roles", keyUUID)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error retrieving user role"}
+	}
+
+	// Check if the user is an admin
+	if string(currentRole) == "admin" {
+		return api.Response{Success: false, Message: "Cannot modify the role of an admin"}
+	}
+
+	// Check if the new role is the same as the current role
+	if string(currentRole) == newRole {
+		return api.Response{Success: false, Message: fmt.Sprintf("The user already has the role '%s'", newRole)}
+	}
+
+	// Update the role in the database
+	if err := s.db.Put("cheese_roles", keyUUID, []byte(newRole)); err != nil {
+		return api.Response{Success: false, Message: "Error updating user role"}
+	}
+
+	return api.Response{Success: true, Message: "User role updated successfully"}
 }
