@@ -846,7 +846,8 @@ func (s *serverImpl) handleSendMessage(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for recipient: " + err.Error()}
 	}
 
-	// Create the conversation ID by lexicographically sorting the two encrypted UUIDs.
+	// Now the concatenation of the encrypted UUIDs are used as the bucket key.
+	// Here is created the bucket key: conversation ID by lexicographically sorting the two encrypted UUIDs.
 	var convID string
 	if encryptedUUIDSender < encryptedUUIDRecipient {
 		convID = fmt.Sprintf("%s:%s", encryptedUUIDSender, encryptedUUIDRecipient)
