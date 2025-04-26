@@ -19,13 +19,14 @@ var bucketUserVotes = "user_votes"
 
 // Poll representa una encuesta en el sistema
 type Poll struct {
-	ID        string         `json:"id"`
-	Title     string         `json:"title"`
-	Options   []string       `json:"options"`
-	Votes     map[string]int `json:"votes"`
-	EndDate   time.Time      `json:"endDate"`
-	CreatedBy string         `json:"createdBy"`
-	Tags      []string       `json:"tags"`
+	ID         string         `json:"id"`
+	Title      string         `json:"title"`
+	Options    []string       `json:"options"`
+	Votes      map[string]int `json:"votes"`
+	EndDate    time.Time      `json:"endDate"`
+	CreatedBy  string         `json:"createdBy"`
+	Tags       []string       `json:"tags"`
+	SingleVote bool           `json:"singlevote"`
 }
 
 // UserVote registra que un usuario ha votado en una encuesta específica
@@ -162,9 +163,10 @@ func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken strin
 
 	// Decodificar los datos del voto
 	var voteData struct {
-		PollID    string `json:"pollId"`
-		Option    string `json:"option"`
-		CreatedBy string `json:"createdBy"`
+		PollID    string   `json:"pollId"`
+		Option    string   `json:"option"`
+		Options   []string `json:"options"`
+		CreatedBy string   `json:"createdBy"`
 	}
 	if err := json.Unmarshal([]byte(req.Data), &voteData); err != nil {
 		return api.Response{Success: false, Message: "Error al decodificar los datos del voto: " + err.Error()}
@@ -201,33 +203,59 @@ func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken strin
 		return api.Response{Success: false, Message: "La encuesta ha finalizado"}
 	}
 
-	// Verificar si la opción es válida
-	optionValid := false
-	for _, option := range poll.Options {
-		if option == voteData.Option {
-			optionValid = true
-			break
+	// Verificar si las opciones de voto son válidas
+	if poll.SingleVote { // VOTO ÚNICO
+		optionValid := false
+		for _, option := range poll.Options {
+			if option == voteData.Option {
+				optionValid = true
+				break
+			}
+		}
+		if voteData.Option == "" {
+			optionValid = true // voto en blanco
+		}
+		if !optionValid {
+			return api.Response{Success: false, Message: "Opción de voto inválida"}
+		}
+
+		// Registrar voto
+		if voteData.Option != "" {
+			poll.Votes[voteData.Option]++
 		}
 	}
-	if voteData.Option == "" {
-		optionValid = true
-	}
-	if !optionValid {
-		return api.Response{Success: false, Message: "Opción de voto inválida"}
+	if !poll.SingleVote { // VOTO MÚLTIPLE
+		if len(voteData.Options) == 0 {
+			return api.Response{Success: false, Message: "Debes seleccionar al menos una opción para votar"}
+		}
+
+		// Validar todas las opciones seleccionadas
+		for _, selectedOption := range voteData.Options {
+			optionValid := false
+			for _, availableOption := range poll.Options {
+				if selectedOption == availableOption {
+					optionValid = true
+					break
+				}
+			}
+			if !optionValid {
+				return api.Response{Success: false, Message: "Una o más opciones de voto son inválidas"}
+			}
+		}
+
+		// Registrar todos los votos
+		for _, selectedOption := range voteData.Options {
+			poll.Votes[selectedOption]++
+		}
 	}
 
-	if voteData.Option != "" {
-		// Incrementar el contador de votos para la opción seleccionada
-		poll.Votes[voteData.Option]++
-
-		// Actualizar la encuesta en la base de datos
-		updatedPollData, err := json.Marshal(poll)
-		if err != nil {
-			return api.Response{Success: false, Message: "Error al serializar la encuesta actualizada: " + err.Error()}
-		}
-		if err := s.db.Put(bucketPolls, keyPoll, updatedPollData); err != nil {
-			return api.Response{Success: false, Message: "Error al actualizar la encuesta: " + err.Error()}
-		}
+	// Actualizar la encuesta en la base de datos
+	updatedPollData, err := json.Marshal(poll)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error al serializar la encuesta actualizada: " + err.Error()}
+	}
+	if err := s.db.Put(bucketPolls, keyPoll, updatedPollData); err != nil {
+		return api.Response{Success: false, Message: "Error al actualizar la encuesta: " + err.Error()}
 	}
 
 	// Registrar que el usuario ha votado en esta encuesta
