@@ -5,19 +5,21 @@ import (
 	"fmt"
 	"prac/pkg/api"
 	"prac/pkg/ui"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // Poll representa una encuesta en el sistema
 type Poll struct {
-	ID        string         `json:"id"`
-	Title     string         `json:"title"`
-	Options   []string       `json:"options"`
-	Votes     map[string]int `json:"votes"`
-	EndDate   time.Time      `json:"endDate"`
-	CreatedBy string         `json:"createdBy"`
-	Tags      []string       `json:"tags"`
+	ID         string         `json:"id"`
+	Title      string         `json:"title"`
+	Options    []string       `json:"options"`
+	Votes      map[string]int `json:"votes"`
+	EndDate    time.Time      `json:"endDate"`
+	CreatedBy  string         `json:"createdBy"`
+	Tags       []string       `json:"tags"`
+	SingleVote bool           `json:"singlevote"`
 }
 
 // UserVote registra que un usuario ha votado en una encuesta específica
@@ -53,6 +55,21 @@ func (c *client) createPoll() {
 		options = append(options, option)
 	}
 
+	// Tipo de voto
+	voteType := ui.ReadInput("¿Encuesta de voto múltiple? (s/n):")
+	if voteType != "s" && voteType != "n" {
+		fmt.Println("Opción no válida")
+		return
+	}
+
+	var singleVote bool
+	if voteType == "s" {
+		singleVote = true
+	}
+	if voteType == "n" {
+		singleVote = false
+	}
+
 	// Solicitar hashtags
 	var tags []string
 	fmt.Println("Introduce hasta 3 hashtags (deja en blanco para terminar):")
@@ -82,11 +99,12 @@ func (c *client) createPoll() {
 
 	// Crear la estructura de la encuesta
 	poll := Poll{
-		Title:     title,
-		Options:   options,
-		EndDate:   endDate,
-		CreatedBy: c.currentUser,
-		Tags:      tags,
+		Title:      title,
+		Options:    options,
+		EndDate:    endDate,
+		CreatedBy:  c.currentUser,
+		Tags:       tags,
+		SingleVote: singleVote,
 	}
 
 	// Serializar la encuesta
@@ -167,6 +185,21 @@ func (c *client) modifyPoll() {
 		newOptions = append(newOptions, option)
 	}
 
+	// Tipo de voto
+	voteType := ui.ReadInput("Multiple vote? (y/n):")
+	if voteType != "y" && voteType != "n" {
+		fmt.Println("Opción no válida")
+		return
+	}
+
+	var singleVote bool
+	if voteType == "y" {
+		singleVote = true
+	}
+	if voteType == "n" {
+		singleVote = false
+	}
+
 	// Validate that there are at least 2 options
 	if len(newOptions) > 0 && len(newOptions) < 2 {
 		fmt.Println("You must provide at least 2 options.")
@@ -188,10 +221,11 @@ func (c *client) modifyPoll() {
 
 	// Create the updated poll structure
 	updatedPoll := Poll{
-		ID:      selectedPoll.ID,
-		Title:   newTitle,
-		Options: newOptions,
-		EndDate: newEndDate,
+		ID:         selectedPoll.ID,
+		Title:      newTitle,
+		Options:    newOptions,
+		EndDate:    newEndDate,
+		SingleVote: singleVote,
 	}
 
 	// Serialize the updated poll
@@ -282,26 +316,71 @@ func (c *client) voteInPoll() {
 	}
 	fmt.Println("0. Voto en blanco")
 
-	// Solicitar la opción de voto
-	optionChoice := ui.ReadInt("Selecciona una opción")
-	if optionChoice < 0 || optionChoice > len(selectedPoll.Options) {
-		fmt.Println("Elección inválida.")
-		return
+	var selectedOptions []string
+	selectedOption := ""
+
+	// Si la encuesta es de voto único
+	if selectedPoll.SingleVote {
+		// Solicitar la opción de voto
+		optionChoice := ui.ReadInt("Selecciona una opción")
+		if optionChoice < 0 || optionChoice > len(selectedPoll.Options) {
+			fmt.Println("Elección inválida.")
+			return
+		}
+
+		if optionChoice != 0 {
+			selectedOption = selectedPoll.Options[optionChoice-1]
+		}
+	} else {
+		// Si la encuesta permite voto múltiple
+		input := ui.ReadInput("Selecciona las opciones que deseas votar (separadas por comas)")
+
+		if input == "" {
+			fmt.Println("No se seleccionó ninguna opción.")
+			return
+		}
+
+		selections := strings.Split(input, ",")
+		selectionMap := make(map[int]bool) // Para evitar votos duplicados
+
+		for _, sel := range selections {
+			sel = strings.TrimSpace(sel)
+			if sel == "" {
+				continue
+			}
+			num, err := strconv.Atoi(sel)
+			if err != nil || num < 0 || num > len(selectedPoll.Options) {
+				fmt.Printf("Opción inválida: %s\n", sel)
+				return
+			}
+
+			if num == 0 {
+				continue // voto en blanco
+			}
+
+			if !selectionMap[num] {
+				selectedOptions = append(selectedOptions, selectedPoll.Options[num-1])
+				selectionMap[num] = true
+			}
+		}
 	}
 
-	selectedOption := ""
-	if optionChoice != 0 {
-		selectedOption = selectedPoll.Options[optionChoice-1]
+	// Mostrar las opciones seleccionadas
+	fmt.Println("Opciones seleccionadas:")
+	for _, opt := range selectedOptions {
+		fmt.Println("-", opt)
 	}
 
 	// Crear la estructura del voto
 	voteData := struct {
-		PollID    string `json:"pollId"`
-		Option    string `json:"option"`
-		CreatedBy string `json:"createdBy"`
+		PollID    string   `json:"pollId"`
+		Option    string   `json:"option"`
+		Options   []string `json:"options"`
+		CreatedBy string   `json:"createdBy"`
 	}{
 		PollID:    selectedPoll.ID,
 		Option:    selectedOption,
+		Options:   selectedOptions,
 		CreatedBy: selectedPoll.CreatedBy,
 	}
 
@@ -376,7 +455,9 @@ func (c *client) viewResults() {
 		fmt.Println("Elección inválida.")
 		return
 	}
-	/*if !polls[choice-1].EndDate.Before(time.Now()) { // No se puede ver los resultados de una encuesta no finalizada
+
+	// No se puede ver los resultados de una encuesta no finalizada
+	/*if !polls[choice-1].EndDate.Before(time.Now()) {
 		fmt.Println("Elección inválida.")
 		return
 	}*/
