@@ -47,6 +47,7 @@ var bucketAuthPassword = "cheese_auth_password"
 var bucketAuthEmail = "cheese_auth_email"
 var bucketAuthUsername = "cheese_auth_username"
 var bucketAuthUsernameEmail = "cheese_auth_username_email"
+var bucketUserGroup = "cheese_user_group"
 var bucketAuthCypherHashedUUID = "cheese_auth_cipher_hashed_uuid"
 var bucketMessages = "messages"
 var bucketBannedUsers = "cheese_banned_users"
@@ -262,10 +263,11 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	case api.ActionPublicKeyLoginResponse:
 		// Verify public key login response; req.Email and req.Data (signature) are required
-		accessToken, refreshToken, role, err := functionalities.VerifyPublicKeyLogin(s.db, req.Email, req.Data)
+		accessToken, refreshToken, role, group, err := functionalities.VerifyPublicKeyLogin(s.db, req.Email, req.Data)
 		responseData := map[string]string{
-			"username": req.Email,
-			"role":     string(role),
+			"username":   req.Email,
+			"role":       string(role),
+			"user_group": string(group), // NEW
 		}
 		responseJSON, _ := json.Marshal(responseData)
 
@@ -345,6 +347,11 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if req.Username == "" || req.Password == "" || req.Email == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
+
+	if req.UserGroup == "" {
+		return api.Response{Success: false, Message: "User group must not be empty"}
+	}
+
 	if len(req.Username) < 4 {
 		return api.Response{Success: false, Message: "Username must have at least 4 characters"}
 	}
@@ -404,6 +411,9 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	if err := s.db.Put("cheese_userdata", keyUUID, []byte("")); err != nil {
 		return api.Response{Success: false, Message: "Error initializing user data"}
 	}
+	if err := s.db.Put(bucketUserGroup, keyUUID, []byte(req.UserGroup)); err != nil {
+		return api.Response{Success: false, Message: "Error saving user group: " + err.Error()}
+	}
 
 	// Assign role "normal" for a user registering using the default registration
 	if err := s.db.Put("cheese_roles", keyUUID, []byte("normal")); err != nil {
@@ -425,8 +435,9 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 
 	// Incluir el rol en la respuesta
 	responseData := map[string]string{
-		"username": req.Username,
-		"role":     string(role),
+		"username":   req.Username,
+		"role":       string(role),
+		"user_group": req.UserGroup,
 	}
 
 	responseJSON, _ := json.Marshal(responseData)
@@ -503,6 +514,10 @@ func createDefaultUsers(db store.Store) error {
 		// Save role for the user in the "cheese_roles" bucket
 		if err := db.Put("cheese_roles", keyUUID, []byte(user.role)); err != nil {
 			return fmt.Errorf("error saving role for %s: %v", user.email, err)
+		}
+
+		if err := db.Put(bucketUserGroup, keyUUID, []byte(user.role)); err != nil { // NEW
+			return fmt.Errorf("error saving user group for %s: %v", user.email, err)
 		}
 
 		// Generate RSA key pair for messaging (public key encryption)
@@ -596,10 +611,13 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 
 	logging.Log("User " + username + " logged in successfully")
 
+	userGroupBytes, _ := s.db.Get(bucketUserGroup, keyUUID)
+
 	// Incluir el rol en la respuesta
 	responseData := map[string]string{
-		"username": username,
-		"role":     string(role),
+		"username":   username,
+		"role":       string(role),
+		"user_group": string(userGroupBytes), // NEW
 	}
 
 	responseJSON, _ := json.Marshal(responseData)

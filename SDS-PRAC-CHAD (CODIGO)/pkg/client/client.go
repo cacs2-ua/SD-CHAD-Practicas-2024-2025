@@ -37,6 +37,7 @@ type client struct {
 	log               *log.Logger
 	currentUser       string
 	currentRole       string // Nuevo campo para almacenar el rol del usuario
+	currentGroup      string
 	authToken         string // access token
 	refreshToken      string // refresh token
 	accessTokenExpiry time.Time
@@ -284,6 +285,13 @@ func (c *client) registerUser() {
 		fmt.Println("Username cannot be empty")
 		return
 	}
+
+	userGroup := ui.ReadInput("User group")
+	if userGroup == "" {
+		fmt.Println("User group cannot be empty")
+		return
+	}
+
 	if len(username) < 4 {
 		fmt.Println("Username must have at least 4 characters")
 		return
@@ -311,10 +319,11 @@ func (c *client) registerUser() {
 
 	// Send the registration request to the server.
 	res, _, _ := c.sendRequest(api.Request{
-		Action:   api.ActionRegister,
-		Username: username,
-		Email:    email,
-		Password: password,
+		Action:    api.ActionRegister,
+		Username:  username,
+		Email:     email,
+		Password:  password,
+		UserGroup: userGroup,
 	})
 
 	// Display the result.
@@ -419,8 +428,9 @@ func (c *client) loginUser() {
 	if res.Success {
 		// Expecting the decrypted username in Data
 		var responseData struct {
-			Username string `json:"username"`
-			Role     string `json:"role"`
+			Username  string `json:"username"`
+			Role      string `json:"role"`
+			UserGroup string `json:"user_group"`
 		}
 		if err := json.Unmarshal([]byte(res.Data), &responseData); err != nil {
 			fmt.Println("Error decoding response data:", err)
@@ -429,6 +439,7 @@ func (c *client) loginUser() {
 
 		c.currentUser = responseData.Username
 		c.currentRole = responseData.Role
+		c.currentGroup = responseData.UserGroup
 
 		if strings.HasPrefix(accessToken, "Bearer ") {
 			accessToken = accessToken[7:]
@@ -528,8 +539,9 @@ func (c *client) loginWithPublicKey() {
 	fmt.Println("Message:", resResp.Message)
 	if resResp.Success {
 		var responseData struct {
-			Username string `json:"username"`
-			Role     string `json:"role"`
+			Username  string `json:"username"`
+			Role      string `json:"role"`
+			UserGroup string `json:"user_group"`
 		}
 		if err := json.Unmarshal([]byte(res.Data), &responseData); err != nil {
 			fmt.Println("Error decoding response data:", err)
@@ -538,6 +550,7 @@ func (c *client) loginWithPublicKey() {
 
 		c.currentUser = responseData.Username
 		c.currentRole = responseData.Role
+		c.currentGroup = responseData.UserGroup
 
 		if strings.HasPrefix(accessToken, "Bearer ") {
 			accessToken = accessToken[7:]

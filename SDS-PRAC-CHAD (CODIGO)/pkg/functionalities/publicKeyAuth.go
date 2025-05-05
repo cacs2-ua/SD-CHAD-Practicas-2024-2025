@@ -158,93 +158,102 @@ func InitiatePublicKeyLogin(db store.Store, email string) (string, string, strin
 // It retrieves the encrypted UUID (using hashed email), decrypts it to obtain the user UUID,
 // then uses the hashed userUUID to access the auth public key.
 // If the signature is valid, it generates tokens and saves the refresh token in the DB.
-func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (string, string, string, error) {
+func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (string, string, string, string, error) {
+	// Lock and fetch the stored nonce for this email
 	nonceMu.Lock()
 	nInfo, exists := nonceMap[email]
 	if !exists {
 		nonceMu.Unlock()
-		return "", "", "", errors.New("no challenge found for this email")
+		return "", "", "", "", errors.New("no challenge found for this email")
 	}
 	if time.Since(nInfo.Timestamp) > 5*time.Minute {
 		delete(nonceMap, email)
 		nonceMu.Unlock()
-		return "", "", "", errors.New("challenge expired")
+		return "", "", "", "", errors.New("challenge expired")
 	}
 	delete(nonceMap, email)
 	nonceMu.Unlock()
 
-	// Retrieve encrypted UUID using hashed email.
+	// 1) Retrieve and decrypt the user UUID
 	encryptedUUID, err := db.Get(bucketAuthUUID, store.HashBytes([]byte(email)))
 	if err != nil {
-		return "", "", "", errors.New("user not found for public key login")
+		return "", "", "", "", errors.New("user not found for public key login")
 	}
 	userUUID, err := pcrypto.DecryptUUID(string(encryptedUUID))
 	if err != nil {
-		return "", "", "", fmt.Errorf("error decrypting user UUID: %v", err)
+		return "", "", "", "", fmt.Errorf("error decrypting user UUID: %v", err)
 	}
 
-	// Check if the user is banned
+	// 2) Check ban status
 	keyUUID := store.HashBytes([]byte(userUUID))
-	_, err = db.Get("cheese_banned_users", keyUUID)
-	if err == nil {
-		return "", "", "", errors.New("user is banned")
+	if _, err := db.Get("cheese_banned_users", keyUUID); err == nil {
+		return "", "", "", "", errors.New("user is banned")
 	}
 
-	// Retrieve auth public key using hashed userUUID.
-	encryptedData, err := db.Get("auth_public_keys", store.HashBytes([]byte(userUUID)))
+	// 3) Load and parse the stored auth‐public‐key
+	encryptedAuthData, err := db.Get("auth_public_keys", keyUUID)
 	if err != nil {
-		return "", "", "", errors.New("auth public key not found")
+		return "", "", "", "", errors.New("auth public key not found")
 	}
-	decryptedData, err := pcrypto.DecryptServer(encryptedData)
+	authDataBytes, err := pcrypto.DecryptServer(encryptedAuthData)
 	if err != nil {
-		return "", "", "", fmt.Errorf("error decrypting auth key data: %v", err)
+		return "", "", "", "", fmt.Errorf("error decrypting auth key data: %v", err)
 	}
 	var authData AuthKeyData
-	if err := json.Unmarshal(decryptedData, &authData); err != nil {
-		return "", "", "", fmt.Errorf("error unmarshaling auth key data: %v", err)
+	if err := json.Unmarshal(authDataBytes, &authData); err != nil {
+		return "", "", "", "", fmt.Errorf("error unmarshaling auth key data: %v", err)
 	}
 	block, _ := pem.Decode([]byte(authData.PublicKey))
 	if block == nil {
-		return "", "", "", errors.New("failed to parse public key PEM")
+		return "", "", "", "", errors.New("failed to parse public key PEM")
 	}
-	pubInterface, err := x509.ParsePKIXPublicKey(block.Bytes)
+	pubIface, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
-		return "", "", "", fmt.Errorf("error parsing public key: %v", err)
+		return "", "", "", "", fmt.Errorf("error parsing public key: %v", err)
 	}
-	pubKey, ok := pubInterface.(*rsa.PublicKey)
+	pubKey, ok := pubIface.(*rsa.PublicKey)
 	if !ok {
-		return "", "", "", errors.New("public key is not RSA")
+		return "", "", "", "", errors.New("public key is not RSA")
 	}
-	signature, err := base64.StdEncoding.DecodeString(signatureB64)
+
+	// 4) Verify signature over the nonce
+	sig, err := base64.StdEncoding.DecodeString(signatureB64)
 	if err != nil {
-		return "", "", "", fmt.Errorf("error decoding signature: %v", err)
+		return "", "", "", "", fmt.Errorf("error decoding signature: %v", err)
 	}
 	hash := sha256.Sum256([]byte(nInfo.Nonce))
-	if err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hash[:], signature); err != nil {
-		return "", "", "", errors.New("signature verification failed")
+	if err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hash[:], sig); err != nil {
+		return "", "", "", "", errors.New("signature verification failed")
 	}
 
-	// Retrieve the role of the user
-	role, err := db.Get("cheese_roles", keyUUID)
+	// 5) Fetch role and group
+	roleBytes, err := db.Get("cheese_roles", keyUUID)
 	if err != nil {
-		return "", "", "", fmt.Errorf("error retrieving user role: %v", err)
+		return "", "", "", "", fmt.Errorf("error retrieving user role: %v", err)
+	}
+	groupBytes, err := db.Get("cheese_user_group", keyUUID)
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("error retrieving user group: %v", err)
 	}
 
-	// Generate tokens using the shared token functions
+	// 6) Generate JWT tokens
 	accessToken, err := token.GenerateAccessToken(userUUID)
 	if err != nil {
-		return "", "", "", fmt.Errorf("error generating access token: %v", err)
+		return "", "", "", "", fmt.Errorf("error generating access token: %v", err)
 	}
 	refreshToken, err := token.GenerateRefreshToken(userUUID)
 	if err != nil {
-		return "", "", "", fmt.Errorf("error generating refresh token: %v", err)
+		return "", "", "", "", fmt.Errorf("error generating refresh token: %v", err)
 	}
-	// Save the refresh token in the database so that auto-refresh works.
+
+	// 7) Persist the hashed refresh token
 	hashedRefresh := store.HashBytes([]byte(refreshToken))
 	if err := db.Put("cheese_refresh", keyUUID, hashedRefresh); err != nil {
-		return "", "", "", fmt.Errorf("error saving refresh token: %v", err)
+		return "", "", "", "", fmt.Errorf("error saving refresh token: %v", err)
 	}
-	return accessToken, refreshToken, string(role), nil
+
+	// Success: return tokens, role and group
+	return accessToken, refreshToken, string(roleBytes), string(groupBytes), nil
 }
 
 // LoadAuthPrivateKey loads the auth private key from keys/users-auth/<username>/private.pem.
