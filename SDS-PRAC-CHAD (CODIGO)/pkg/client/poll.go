@@ -162,6 +162,9 @@ func (c *client) modifyPoll() {
 	fmt.Println("Available polls to modify:")
 	for i, poll := range polls {
 		fmt.Printf("%d. %s (ends on %s)\n", i+1, poll.Title, poll.EndDate.Format("02/01/2006 15:04"))
+		if len(poll.Tags) > 0 {
+			fmt.Printf("   Hashtags: %s\n", strings.Join(poll.Tags, ", "))
+		}
 		if poll.UserGroup != "" {
 			fmt.Printf("   User Group: %s\n", poll.UserGroup)
 		}
@@ -475,6 +478,11 @@ func (c *client) viewResults() {
 			//fmt.Printf("%d. %s\n", i+1, poll.Title)
 		}
 		fmt.Printf("%d. %s (%s)\n", i+1, poll.Title, status)
+
+		if len(poll.Tags) > 0 {
+			fmt.Printf("   Hashtags: %s\n", strings.Join(poll.Tags, ", "))
+		}
+
 		if poll.UserGroup != "" {
 			fmt.Printf("   User Group: %s\n", poll.UserGroup)
 		}
