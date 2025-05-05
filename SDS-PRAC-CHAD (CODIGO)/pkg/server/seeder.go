@@ -43,6 +43,7 @@ func (s *serverImpl) seedPolls() {
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
 			SingleVote: false,
+			UserGroup:  "programadores",
 		},
 		{
 			Title:      "Nota que se merece este trabajo",
@@ -50,6 +51,7 @@ func (s *serverImpl) seedPolls() {
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
 			SingleVote: true,
+			UserGroup:  "estudiantes",
 		},
 		{
 			Title:      "Mejor tortilla de patatas",
@@ -57,6 +59,7 @@ func (s *serverImpl) seedPolls() {
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
 			SingleVote: true,
+			UserGroup:  "",
 		},
 	}
 

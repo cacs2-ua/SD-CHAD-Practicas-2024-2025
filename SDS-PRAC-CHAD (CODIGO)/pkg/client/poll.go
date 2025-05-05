@@ -20,6 +20,7 @@ type Poll struct {
 	CreatedBy  string         `json:"createdBy"`
 	Tags       []string       `json:"tags"`
 	SingleVote bool           `json:"singlevote"`
+	UserGroup  string         `json:"user_group,omitempty"`
 }
 
 // UserVote registra que un usuario ha votado en una encuesta específica
@@ -39,6 +40,8 @@ func (c *client) createPoll() {
 		fmt.Println("El título no puede estar vacío.")
 		return
 	}
+
+	userGroup := ui.ReadInput("Asigna un grupo de usuarios (opcional)")
 
 	// Solicitar opciones de voto
 	var options []string
@@ -105,6 +108,7 @@ func (c *client) createPoll() {
 		CreatedBy:  c.currentUser,
 		Tags:       tags,
 		SingleVote: singleVote,
+		UserGroup:  strings.TrimSpace(userGroup),
 	}
 
 	// Serializar la encuesta
@@ -157,6 +161,9 @@ func (c *client) modifyPoll() {
 	fmt.Println("Available polls to modify:")
 	for i, poll := range polls {
 		fmt.Printf("%d. %s (ends on %s)\n", i+1, poll.Title, poll.EndDate.Format("02/01/2006 15:04"))
+		if poll.UserGroup != "" {
+			fmt.Printf("   User Group: %s\n", poll.UserGroup)
+		}
 	}
 
 	// Ask the user to select a poll
@@ -172,9 +179,15 @@ func (c *client) modifyPoll() {
 	fmt.Printf("Current title: %s\n", selectedPoll.Title)
 	fmt.Printf("Current options: %s\n", strings.Join(selectedPoll.Options, ", "))
 	fmt.Printf("Current end date: %s\n", selectedPoll.EndDate.Format("02/01/2006 15:04"))
+	if selectedPoll.UserGroup != "" {
+		fmt.Printf("Current user group: %s\n", selectedPoll.UserGroup)
+	}
 
 	// Ask for new data
 	newTitle := ui.ReadInput("New title (leave blank to keep):")
+
+	newUserGroup := ui.ReadInput("New user group (leave blank to keep):")
+
 	newOptions := []string{}
 	fmt.Println("Enter new options (leave blank to keep current options):")
 	for i := 1; ; i++ {
@@ -222,10 +235,20 @@ func (c *client) modifyPoll() {
 	// Create the updated poll structure
 	updatedPoll := Poll{
 		ID:         selectedPoll.ID,
-		Title:      newTitle,
-		Options:    newOptions,
-		EndDate:    newEndDate,
 		SingleVote: singleVote,
+	}
+
+	if newTitle != "" {
+		updatedPoll.Title = newTitle
+	}
+	if len(newOptions) > 0 {
+		updatedPoll.Options = newOptions
+	}
+	if !newEndDate.IsZero() {
+		updatedPoll.EndDate = newEndDate
+	}
+	if newUserGroup != "" {
+		updatedPoll.UserGroup = strings.TrimSpace(newUserGroup)
 	}
 
 	// Serialize the updated poll
@@ -296,6 +319,10 @@ func (c *client) voteInPoll() {
 		fmt.Printf("%d. %s (finaliza el %s)\n", i+1, poll.Title, poll.EndDate.Format("02/01/2006 15:04"))
 		if len(poll.Tags) > 0 {
 			fmt.Printf("   Hashtags: %s\n", strings.Join(poll.Tags, ", "))
+		}
+
+		if poll.UserGroup != "" {
+			fmt.Printf("   Grupo de Usuario: %s\n", poll.UserGroup)
 		}
 	}
 
@@ -447,6 +474,9 @@ func (c *client) viewResults() {
 			//fmt.Printf("%d. %s\n", i+1, poll.Title)
 		}
 		fmt.Printf("%d. %s (%s)\n", i+1, poll.Title, status)
+		if poll.UserGroup != "" {
+			fmt.Printf("   User Group: %s\n", poll.UserGroup)
+		}
 	}
 
 	// Solicitar la elección del usuario
@@ -490,6 +520,10 @@ func (c *client) viewResults() {
 	ui.ClearScreen()
 	fmt.Printf("** Resultados de la Encuesta: %s **\n\n", pollResults.Title)
 	fmt.Printf("Creada por: %s\n", pollResults.CreatedBy)
+
+	if pollResults.UserGroup != "" {
+		fmt.Printf("Grupo de Usuario: %s\n", pollResults.UserGroup)
+	}
 
 	status := "Activa"
 	if pollResults.EndDate.Before(time.Now()) {

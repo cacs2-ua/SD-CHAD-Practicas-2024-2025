@@ -27,6 +27,7 @@ type Poll struct {
 	CreatedBy  string         `json:"createdBy"`
 	Tags       []string       `json:"tags"`
 	SingleVote bool           `json:"singlevote"`
+	UserGroup  string         `json:"user_group,omitempty"`
 }
 
 // UserVote registra que un usuario ha votado en una encuesta específica
@@ -80,6 +81,8 @@ func (s *serverImpl) handleCreatePoll(req api.Request, providedAccessToken strin
 	for _, option := range poll.Options {
 		poll.Votes[option] = 0
 	}
+
+	poll.UserGroup = strings.TrimSpace(poll.UserGroup)
 
 	// Serializar encuesta
 	pollData, err := json.Marshal(poll)
@@ -142,6 +145,10 @@ func (s *serverImpl) handleModifyPoll(req api.Request, providedAccessToken strin
 			return api.Response{Success: false, Message: "End date must be in the future"}
 		}
 		existingPoll.EndDate = updatedPoll.EndDate
+	}
+
+	if strings.TrimSpace(updatedPoll.UserGroup) != "" {
+		existingPoll.UserGroup = strings.TrimSpace(updatedPoll.UserGroup)
 	}
 
 	// Serialize the updated poll
