@@ -448,13 +448,19 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 func createDefaultUsers(db store.Store) error {
 	// Define default users data in an array of structs (email, username, password, role)
 	defaultUsers := []struct {
-		email    string
-		username string
-		password string
-		role     string
+		email     string
+		username  string
+		password  string
+		role      string
+		userGroup string
 	}{
-		{"admin1@gmail.com", "admin1", "admin1admin1", "admin"},
-		{"moderator1@gmail.com", "moderator1", "moderator1", "moderator"},
+		{"admin1@gmail.com", "admin1", "admin1admin1", "admin", "admin"},
+		{"moderator1@gmail.com", "moderator1", "moderator1", "moderator", "moderator"},
+
+		{"programador1@gmail.com", "programador1", "programador1", "normal", "programadores"},
+		{"estudiante1@gmail.com", "estudiante1", "estudiante1", "normal", "estudiantes"},
+		{"deportista1@gmail.com", "deportista1", "deportista1", "normal", "deportistas"},
+		{"chadorador1@gmail.com", "chadorador1", "chadorador1", "normal", "oradores"},
 	}
 
 	for _, user := range defaultUsers {
@@ -516,7 +522,7 @@ func createDefaultUsers(db store.Store) error {
 			return fmt.Errorf("error saving role for %s: %v", user.email, err)
 		}
 
-		if err := db.Put(bucketUserGroup, keyUUID, []byte(user.role)); err != nil { // NEW
+		if err := db.Put(bucketUserGroup, keyUUID, []byte(user.userGroup)); err != nil {
 			return fmt.Errorf("error saving user group for %s: %v", user.email, err)
 		}
 
