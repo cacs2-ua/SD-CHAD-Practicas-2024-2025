@@ -67,10 +67,10 @@ func (c *client) createPoll() {
 
 	var singleVote bool
 	if voteType == "s" {
-		singleVote = true
+		singleVote = false
 	}
 	if voteType == "n" {
-		singleVote = false
+		singleVote = true
 	}
 
 	// Solicitar hashtags
@@ -138,7 +138,8 @@ func (c *client) modifyPoll() {
 
 	// Request the list of polls from the server
 	res, _, _ := c.sendRequest(api.Request{
-		Action: api.ActionListPolls,
+		Action:   api.ActionListPolls,
+		Username: c.currentUser,
 	})
 
 	if !res.Success {
@@ -207,10 +208,10 @@ func (c *client) modifyPoll() {
 
 	var singleVote bool
 	if voteType == "y" {
-		singleVote = true
+		singleVote = false
 	}
 	if voteType == "n" {
-		singleVote = false
+		singleVote = true
 	}
 
 	// Validate that there are at least 2 options

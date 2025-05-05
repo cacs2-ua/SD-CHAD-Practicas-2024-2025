@@ -75,7 +75,7 @@ func (s *serverImpl) seedPolls() {
 			Options:    []string{"Git", "Mercurial", "SVN", "Perforce"},
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
-			SingleVote: true,
+			SingleVote: false,
 			UserGroup:  "programadores",
 		},
 
@@ -93,7 +93,7 @@ func (s *serverImpl) seedPolls() {
 			Options:    []string{"Paella", "Pizza"},
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
-			SingleVote: true,
+			SingleVote: false,
 			UserGroup:  "estudiantes",
 		},
 		{
@@ -101,7 +101,7 @@ func (s *serverImpl) seedPolls() {
 			Options:    []string{"Matematicas", "Historia", "Fisica", "Literatura"},
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
-			SingleVote: false,
+			SingleVote: true,
 			UserGroup:  "estudiantes",
 		},
 		{
@@ -135,7 +135,7 @@ func (s *serverImpl) seedPolls() {
 			Options:    []string{"Cardio", "Pesas", "Natacion", "Ciclismo"},
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
-			SingleVote: false,
+			SingleVote: true,
 			UserGroup:  "deportistas",
 		},
 		{
@@ -143,7 +143,7 @@ func (s *serverImpl) seedPolls() {
 			Options:    []string{"FC Barcelona", "Real Madrid", "Atletico", "Valencia"},
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
-			SingleVote: true,
+			SingleVote: false,
 			UserGroup:  "deportistas",
 		},
 		{
@@ -178,7 +178,7 @@ func (s *serverImpl) seedPolls() {
 			Options:    []string{"Britanico", "Académico", "Lincoln Douglas", "Karl Popper", "Oxford"},
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
-			SingleVote: true,
+			SingleVote: false,
 			UserGroup:  "oradores",
 		},
 		{
@@ -186,7 +186,7 @@ func (s *serverImpl) seedPolls() {
 			Options:    []string{"Politica", "Derechos humanos", "Ciencias", "Medio ambiente"},
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
-			SingleVote: false,
+			SingleVote: true,
 			UserGroup:  "oradores",
 		},
 		{
@@ -194,7 +194,7 @@ func (s *serverImpl) seedPolls() {
 			Options:    []string{"1 min", "2 min", "3 min", "5 min"},
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
-			SingleVote: true,
+			SingleVote: false,
 			UserGroup:  "oradores",
 		},
 		{
@@ -212,7 +212,7 @@ func (s *serverImpl) seedPolls() {
 			Options:    []string{"Con cebolla", "Sin cebolla"},
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
-			SingleVote: true,
+			SingleVote: false,
 			UserGroup:  "",
 		},
 		{
@@ -244,7 +244,7 @@ func (s *serverImpl) seedPolls() {
 			Options:    []string{"Perro", "Gato", "Pez", "Pajaro"},
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
-			SingleVote: true,
+			SingleVote: false,
 			UserGroup:  "",
 		},
 	}

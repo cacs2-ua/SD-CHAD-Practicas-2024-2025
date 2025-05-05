@@ -151,6 +151,8 @@ func (s *serverImpl) handleModifyPoll(req api.Request, providedAccessToken strin
 		existingPoll.UserGroup = strings.TrimSpace(updatedPoll.UserGroup)
 	}
 
+	existingPoll.SingleVote = updatedPoll.SingleVote
+
 	// Serialize the updated poll
 	updatedPollData, err := json.Marshal(existingPoll)
 	if err != nil {
@@ -306,6 +308,10 @@ func (s *serverImpl) handleViewResults(req api.Request, providedAccessToken stri
 		return api.Response{Success: false, Message: "Error al decodificar la encuesta: " + err.Error()}
 	}
 
+	if !s.hasAccessToPoll(req.Username, poll) {
+		return api.Response{Success: false, Message: "No tienes acceso a esta encuesta"}
+	}
+
 	// Serializar los resultados
 	resultsData, err := json.Marshal(poll)
 	if err != nil {
@@ -321,6 +327,13 @@ func (s *serverImpl) handleViewResults(req api.Request, providedAccessToken stri
 
 // handleListPolls obtiene la lista de todas las encuestas disponibles
 func (s *serverImpl) handleListPolls(req api.Request, providedAccessToken string) api.Response {
+	if req.Username == "" {
+		return api.Response{
+			Success: false,
+			Message: "Authentication required",
+		}
+	}
+
 	pollKeys, err := s.db.ListKeys(bucketPolls)
 	if err != nil {
 		if fmt.Sprintf("%v", err) == "bucket not found: "+fmt.Sprintf("%x", store.BucketName(bucketPolls)) {
@@ -347,6 +360,10 @@ func (s *serverImpl) handleListPolls(req api.Request, providedAccessToken string
 			continue
 		}
 
+		if !s.hasAccessToPoll(req.Username, poll) {
+			continue
+		}
+
 		polls = append(polls, poll)
 	}
 
@@ -364,4 +381,43 @@ func (s *serverImpl) handleListPolls(req api.Request, providedAccessToken string
 		Message: "Encuestas obtenidas correctamente",
 		Data:    string(pollsJSON),
 	}
+}
+
+// getRoleAndGroup returns the role and user_group for a given username.
+func (s *serverImpl) getRoleAndGroup(username string) (string, string, error) {
+	userUUID, err := s.lookupUUIDFromUsername(username)
+	if err != nil {
+		return "", "", err
+	}
+	key := store.HashBytes([]byte(userUUID))
+
+	roleBytes, err := s.db.Get("cheese_roles", key)
+	if err != nil {
+		return "", "", err
+	}
+
+	groupBytes, err := s.db.Get(bucketUserGroup, key)
+	if err != nil {
+		// an empty group is a valid state (general polls)
+		groupBytes = []byte("")
+	}
+
+	return string(roleBytes), string(groupBytes), nil
+}
+
+// hasAccessToPoll enforces the “same user_group” rule for non-admin/moderator users.
+func (s *serverImpl) hasAccessToPoll(username string, poll Poll) bool {
+	role, userGroup, err := s.getRoleAndGroup(username)
+	if err != nil {
+		return false
+	}
+	if role == "admin" || role == "moderator" {
+		return true
+	}
+
+	pollGroup := strings.TrimSpace(poll.UserGroup)
+	if pollGroup == "" { // polls without group are public
+		return true
+	}
+	return pollGroup == strings.TrimSpace(userGroup)
 }
