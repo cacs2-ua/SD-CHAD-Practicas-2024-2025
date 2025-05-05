@@ -38,22 +38,25 @@ func (s *serverImpl) seedPolls() {
 
 	samplePolls := []Poll{
 		{
-			Title:     "Mejor lenguaje de programación",
-			Options:   []string{"Go", "Python", "C++", "JavaScript"},
-			EndDate:   time.Now().Add(24 * time.Hour),
-			CreatedBy: "admin",
+			Title:      "Mejor lenguaje de programación",
+			Options:    []string{"Go", "Python", "C++", "JavaScript"},
+			EndDate:    time.Now().Add(24 * time.Hour),
+			CreatedBy:  "admin",
+			SingleVote: false,
 		},
 		{
-			Title:     "Nota que se merece este trabajo",
-			Options:   []string{"Un 10", "Un 5 x 2", "Diez veces 1", "Venga va, os pongo un 10"},
-			EndDate:   time.Now().Add(24 * time.Hour),
-			CreatedBy: "admin",
+			Title:      "Nota que se merece este trabajo",
+			Options:    []string{"Un 10", "Un 5 x 2", "Diez veces 1", "Venga va, os pongo un 10"},
+			EndDate:    time.Now().Add(24 * time.Hour),
+			CreatedBy:  "admin",
+			SingleVote: true,
 		},
 		{
-			Title:     "Mejor tortilla de patatas",
-			Options:   []string{"Con cebolla", "Sin cebolla"},
-			EndDate:   time.Now().Add(24 * time.Hour),
-			CreatedBy: "admin",
+			Title:      "Mejor tortilla de patatas",
+			Options:    []string{"Con cebolla", "Sin cebolla"},
+			EndDate:    time.Now().Add(24 * time.Hour),
+			CreatedBy:  "admin",
+			SingleVote: true,
 		},
 	}
 
