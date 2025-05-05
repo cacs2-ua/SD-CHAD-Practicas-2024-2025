@@ -106,7 +106,12 @@ func (c *client) runLoop() {
 		if c.currentUser == "" {
 			title = "Menu"
 		} else {
-			title = fmt.Sprintf("Menu (%s - %s)", c.currentUser, c.currentRole)
+			title = fmt.Sprintf(
+				"Menu (%s - role: \"%s\" - user_group: \"%s\")",
+				c.currentUser,
+				c.currentRole,
+				c.currentGroup,
+			)
 		}
 
 		// Generate options dynamically based on login state.
@@ -543,12 +548,12 @@ func (c *client) loginWithPublicKey() {
 			Role      string `json:"role"`
 			UserGroup string `json:"user_group"`
 		}
-		if err := json.Unmarshal([]byte(res.Data), &responseData); err != nil {
+		if err := json.Unmarshal([]byte(resResp.Data), &responseData); err != nil {
 			fmt.Println("Error decoding response data:", err)
 			return
 		}
 
-		c.currentUser = responseData.Username
+		c.currentUser = username
 		c.currentRole = responseData.Role
 		c.currentGroup = responseData.UserGroup
 
