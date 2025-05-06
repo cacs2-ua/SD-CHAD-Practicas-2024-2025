@@ -20,7 +20,7 @@ func SetPrivateKey(key ed25519.PrivateKey) {
 func GenerateAccessToken(userUUID string) (string, error) {
 	claims := jwt.StandardClaims{
 		Subject:   userUUID,
-		ExpiresAt: time.Now().Add(time.Minute).Unix(),
+		ExpiresAt: time.Now().Add(16 * time.Minute).Unix(),
 		IssuedAt:  time.Now().Unix(),
 		Issuer:    "tomato-potato-server",
 	}
@@ -32,7 +32,7 @@ func GenerateAccessToken(userUUID string) (string, error) {
 func GenerateRefreshToken(userUUID string) (string, error) {
 	claims := jwt.StandardClaims{
 		Subject:   userUUID,
-		ExpiresAt: time.Now().Add(7 * 24 * time.Hour).Unix(),
+		ExpiresAt: time.Now().Add(31 * 24 * time.Hour).Unix(),
 		IssuedAt:  time.Now().Unix(),
 		Issuer:    "tomato-potato-server",
 	}

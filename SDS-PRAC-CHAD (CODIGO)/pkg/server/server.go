@@ -116,30 +116,6 @@ func validateJWTSignature(tokenStr string) (*jwt.Token, error) {
 	return token, nil
 }
 
-// generateAccessToken creates an access JWT for the given user UUID with short expiration.
-func generateAccessToken(userUUID string) (string, error) {
-	claims := jwt.StandardClaims{
-		Subject:   userUUID,
-		ExpiresAt: time.Now().Add(time.Minute).Unix(),
-		IssuedAt:  time.Now().Unix(),
-		Issuer:    "tomato-potato-server",
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
-	return token.SignedString(privateKey)
-}
-
-// generateRefreshToken creates a refresh JWT for the given user UUID with longer expiration.
-func generateRefreshToken(userUUID string) (string, error) {
-	claims := jwt.StandardClaims{
-		Subject:   userUUID,
-		ExpiresAt: time.Now().Add(7 * 24 * time.Hour).Unix(),
-		IssuedAt:  time.Now().Unix(),
-		Issuer:    "tomato-potato-server",
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
-	return token.SignedString(privateKey)
-}
-
 // hashPasswordSHA3 hashes a password using SHA3-256 and returns a hex-encoded string.
 func hashPasswordSHA3(password string) string {
 	hasher := sha3.New256()
