@@ -122,8 +122,14 @@ func DownloadBackupFromGoogleDrive(fileID string, destinationPath string) error 
 		return fmt.Errorf("error decrypting file: %v", err)
 	}
 
-	if err := os.Remove(encryptedFilePath); err != nil {
-		return fmt.Errorf("error deleting encrypted file: %v", err)
+	// Se hacen 3 intentos, ya que el borrado puede fallar al
+	// realizarse simultáneamente con el restore del backup
+	for i := 0; i < 3; i++ {
+		err := os.Remove(encryptedFilePath)
+		if err == nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	return nil
