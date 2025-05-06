@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"prac/pkg/client"
-	"prac/pkg/logging"
 	"prac/pkg/server"
 	"prac/pkg/ui"
 )
@@ -40,9 +39,8 @@ func main() {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Ahora registramos también en Google Drive
 	logger.Println("Servidor arrancado en HTTPS en :9200")
-	logging.Log("Servidor arrancado en HTTPS en :9200")
+	//logging.Log("Servidor arrancado en HTTPS en :9200")
 
 	logger.Println("Iniciando cliente...")
 	client.Run()
