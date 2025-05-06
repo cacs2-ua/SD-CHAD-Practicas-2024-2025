@@ -85,7 +85,7 @@ func (c *client) createPoll() {
 	fmt.Println("Introduce la hora de finalización (formato: HH:MM):")
 	timeStr := ui.ReadInput("Hora")
 
-	endDate, err := time.Parse("02/01/2006 15:04", dateStr+" "+timeStr)
+	endDate, err := time.ParseInLocation("02/01/2006 15:04", dateStr+" "+timeStr, time.Local)
 	if err != nil {
 		fmt.Println("Formato de fecha u hora inválido:", err)
 		return
@@ -206,7 +206,7 @@ func (c *client) modifyPoll() {
 	var newEndDate time.Time
 	var err error
 	if newDateStr != "" {
-		newEndDate, err = time.Parse("02/01/2006 15:04", newDateStr)
+		newEndDate, err = time.ParseInLocation("02/01/2006 15:04", newDateStr, time.Local)
 		if err != nil {
 			fmt.Println("Invalid date format:", err)
 			return
