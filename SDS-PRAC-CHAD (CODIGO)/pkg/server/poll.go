@@ -48,7 +48,7 @@ func (s *serverImpl) handleCreatePoll(req api.Request, providedAccessToken strin
 	if len(poll.Options) < 2 {
 		return api.Response{Success: false, Message: "La encuesta debe tener al menos 2 opciones"}
 	}
-	if poll.EndDate.Before(time.Now()) {
+	if !time.Now().Before(poll.EndDate) {
 		return api.Response{Success: false, Message: "La fecha de finalización debe ser en el futuro"}
 	}
 
@@ -131,7 +131,7 @@ func (s *serverImpl) handleModifyPoll(req api.Request, providedAccessToken strin
 		existingPoll.Options = updatedPoll.Options
 	}
 	if !updatedPoll.EndDate.IsZero() {
-		if updatedPoll.EndDate.Before(time.Now()) {
+		if !time.Now().Before(updatedPoll.EndDate) {
 			return api.Response{Success: false, Message: "End date must be in the future"}
 		}
 		existingPoll.EndDate = updatedPoll.EndDate
@@ -193,7 +193,7 @@ func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken strin
 		return api.Response{Success: false, Message: "Error al decodificar la encuesta: " + err.Error()}
 	}
 
-	if poll.EndDate.Before(time.Now()) {
+	if !time.Now().Before(poll.EndDate) {
 		return api.Response{Success: false, Message: "La encuesta ha finalizado"}
 	}
 
