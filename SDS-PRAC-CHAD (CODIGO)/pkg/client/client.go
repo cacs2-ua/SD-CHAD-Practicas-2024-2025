@@ -285,15 +285,22 @@ func (c *client) registerUser() {
 	ui.ClearScreen()
 	fmt.Println("** User Registration **")
 
-	username := ui.ReadInput("Username")
+	rawUsername := ui.ReadInput("Username")
+	username := strings.TrimSpace(rawUsername)
 	if username == "" {
 		fmt.Println("Username cannot be empty")
 		return
 	}
 
-	userGroup := ui.ReadInput("User group")
+	rawUserGroup := ui.ReadInput("User group")
+	userGroup := strings.TrimSpace(rawUserGroup)
 	if userGroup == "" {
 		fmt.Println("User group cannot be empty")
+		return
+	}
+
+	if len(userGroup) < 4 {
+		fmt.Println("User group must have at least 4 characters")
 		return
 	}
 
@@ -312,7 +319,8 @@ func (c *client) registerUser() {
 		return
 	}
 
-	password := ui.ReadPassword("Password")
+	rawPassword := ui.ReadPassword("Password")
+	password := strings.TrimSpace(rawPassword)
 	if password == "" {
 		fmt.Println("Password cannot be empty")
 		return

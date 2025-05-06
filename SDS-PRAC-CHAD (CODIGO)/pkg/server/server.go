@@ -344,12 +344,20 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 // 6. In cheese_userdata: key = hash(UUID), value = "" (empty)
 // Additionally, it generates an RSA key pair for messaging.
 func (s *serverImpl) registerUser(req api.Request) api.Response {
+	req.Username = strings.TrimSpace(req.Username)
+	req.Password = strings.TrimSpace(req.Password)
+	req.UserGroup = strings.TrimSpace(req.UserGroup)
+
 	if req.Username == "" || req.Password == "" || req.Email == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
 	}
 
 	if req.UserGroup == "" {
 		return api.Response{Success: false, Message: "User group must not be empty"}
+	}
+
+	if len(req.UserGroup) < 4 {
+		return api.Response{Success: false, Message: "User group must have at least 4 characters"}
 	}
 
 	if len(req.Username) < 4 {
