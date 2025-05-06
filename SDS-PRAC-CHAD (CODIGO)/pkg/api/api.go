@@ -27,6 +27,14 @@ const (
 	ActionBanUser        = "banUser"
 	ActionUnbanUser      = "unbanUser"
 	ActionCheckBanStatus = "checkBanStatus"
+
+	// Actions for User Groups
+	ActionCreateUserGroup       = "createUserGroup"
+	ActionEditUserGroup         = "editUserGroup"
+	ActionDeleteUserGroup       = "deleteUserGroup"
+	ActionListUserGroups        = "listUserGroups"
+	ActionListUserGroupsForUser = "listUserGroupsForUser"
+	ActionDebugUserGroup        = "debug_list_groups"
 )
 
 type Request struct {

@@ -148,6 +148,25 @@ func Run() error {
 		return fmt.Errorf("error creating messages bucket: %v", err)
 	}
 
+	// Crear el bucket "user_groups" si no existe
+	bs, ok = db.(*store.BboltStore)
+	if !ok {
+		return fmt.Errorf("error asserting store to *BboltStore")
+	}
+	err = bs.DB.Update(func(tx *bbolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists(store.BucketName("user_groups"))
+		if err != nil {
+			return fmt.Errorf("error creating bucket 'user_groups': %v", err)
+		} else {
+			// Comentar
+			fmt.Print("Bucket 'user_groups' created successfully\n")
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("error initializing database: %v", err)
+	}
+
 	srv := &serverImpl{
 		db:  db,
 		log: log.New(os.Stdout, "[srv] ", log.LstdFlags),
@@ -270,6 +289,19 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res = s.unbanUser(req)
 	case api.ActionCheckBanStatus:
 		res = s.checkUserBanStatus(req)
+	// User Groups Handlers
+	case api.ActionCreateUserGroup:
+		res = s.handleCreateUserGroup(req)
+	case api.ActionEditUserGroup:
+		res = s.handleEditUserGroup(req)
+	case api.ActionDeleteUserGroup:
+		res = s.handleDeleteUserGroup(req)
+	case api.ActionListUserGroups:
+		res = s.handleListUserGroups(req)
+	case api.ActionListUserGroupsForUser:
+		res = s.handleListUserGroupsForUser(req)
+	case api.ActionDebugUserGroup:
+		res = s.handleDebugListGroups(req)
 	default:
 		res = api.Response{Success: false, Message: "Unknown action"}
 	}
@@ -752,7 +784,7 @@ func (s *serverImpl) restoreDatabase(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error counting database entries: " + err.Error()}
 	}
 
-	logging.Log(fmt.Sprintf("Backup restored for the user %s: %s", req.Username))
+	logging.Log(fmt.Sprintf("Backup restored for the user %s", req.Username))
 	return api.Response{
 		Success: true,
 		Message: fmt.Sprintf("Backup restored successfully. Total entries restored: %d", lineCount),
@@ -1025,4 +1057,257 @@ func (s *serverImpl) handleModifyUserRole(req api.Request, providedAccessToken s
 	logging.Log(fmt.Sprintf("User role modified: %s -> %s", req.Username, newRole))
 
 	return api.Response{Success: true, Message: "User role updated successfully"}
+}
+
+func (s *serverImpl) handleEditUserGroup(req api.Request) api.Response {
+	var group struct {
+		ID      string   `json:"id"`
+		Name    string   `json:"name"`
+		Members []string `json:"members"`
+	}
+	if err := json.Unmarshal([]byte(req.Data), &group); err != nil {
+		return api.Response{Success: false, Message: "Error decoding group data: " + err.Error()}
+	}
+
+	if group.ID == "" {
+		return api.Response{Success: false, Message: "Group ID cannot be empty"}
+	}
+
+	groupData, err := json.Marshal(group)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error serializing group data: " + err.Error()}
+	}
+
+	if err := s.db.Put("user_groups", []byte(group.ID), groupData); err != nil {
+		return api.Response{Success: false, Message: "Error updating group: " + err.Error()}
+	}
+
+	return api.Response{Success: true, Message: "Group updated successfully"}
+}
+
+func (s *serverImpl) handleListUserGroupsForUser(req api.Request) api.Response {
+	var userGroups []string
+
+	// Obtener todos los grupos de usuarios
+	groupKeys, err := s.db.ListKeys("user_groups")
+	if err != nil {
+		return api.Response{Success: false, Message: "Error listing groups: " + err.Error()}
+	} else {
+		// Comentar
+		fmt.Print("user_groups existe")
+	}
+
+	// Filtrar los grupos a los que pertenece el usuario
+	for _, key := range groupKeys {
+		groupData, err := s.db.Get("user_groups", key)
+		if err != nil {
+			continue
+		}
+
+		var group struct {
+			Name    string   `json:"name"`
+			Members []string `json:"members"`
+		}
+		if err := json.Unmarshal(groupData, &group); err != nil {
+			continue
+		}
+
+		// Verificar si el usuario pertenece al grupo
+		for _, member := range group.Members {
+			if member == req.Username {
+				userGroups = append(userGroups, group.Name)
+				break
+			}
+		}
+	}
+
+	// Serializar los grupos del usuario
+	groupsData, err := json.Marshal(userGroups)
+	if err != nil {
+		return api.Response{Success: false, Message: "Error serializing user groups: " + err.Error()}
+	}
+
+	return api.Response{Success: true, Message: "User groups retrieved successfully", Data: string(groupsData)}
+}
+
+// Correcciones para el manejo de grupos en el servidor
+
+// Corrección para handleListUserGroups - Usar un enfoque más robusto
+// Función para depurar el listado de grupos
+func (s *serverImpl) handleListUserGroups(req api.Request) api.Response {
+	// Añadir logs de depuración
+	fmt.Println("DEBUG: Listing user groups...")
+
+	var groups []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+
+	// Obtener todas las claves de grupos
+	groupKeys, err := s.db.ListKeys("user_groups")
+	if err != nil {
+		fmt.Printf("DEBUG: Error listing keys: %s\n", err.Error())
+		return api.Response{Success: false, Message: "Error listing groups: " + err.Error()}
+	}
+
+	fmt.Printf("DEBUG: Found %d keys in user_groups bucket\n", len(groupKeys))
+
+	// Para cada clave, obtener los datos del grupo
+	for i, key := range groupKeys {
+		fmt.Printf("DEBUG: Processing key %d: %s\n", i, string(key))
+
+		groupData, err := s.db.Get("user_groups", key)
+		if err != nil {
+			fmt.Printf("DEBUG: Error getting group data for key %s: %s\n", string(key), err.Error())
+			continue // Ignorar errores individuales
+		}
+
+		fmt.Printf("DEBUG: Group data for key %s: %s\n", string(key), string(groupData))
+
+		var group struct {
+			ID      string   `json:"id"`
+			Name    string   `json:"name"`
+			Members []string `json:"members"`
+		}
+		if err := json.Unmarshal(groupData, &group); err != nil {
+			fmt.Printf("DEBUG: Error unmarshalling group data: %s\n", err.Error())
+			continue // Ignorar entradas no válidas
+		}
+
+		fmt.Printf("DEBUG: Parsed group - ID: %s, Name: %s, Members: %v\n",
+			group.ID, group.Name, group.Members)
+
+		// Añadir a la lista de grupos
+		groups = append(groups, struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}{
+			ID:   group.ID,
+			Name: group.Name,
+		})
+	}
+
+	fmt.Printf("DEBUG: Total groups found: %d\n", len(groups))
+
+	// Serializar los grupos
+	groupsData, err := json.Marshal(groups)
+	if err != nil {
+		fmt.Printf("DEBUG: Error serializing groups: %s\n", err.Error())
+		return api.Response{Success: false, Message: "Error serializing groups: " + err.Error()}
+	}
+
+	fmt.Printf("DEBUG: Serialized groups: %s\n", string(groupsData))
+
+	return api.Response{Success: true, Message: "Groups retrieved successfully", Data: string(groupsData)}
+}
+
+// Versión corregida de handleCreateUserGroup con logs de depuración
+func (s *serverImpl) handleCreateUserGroup(req api.Request) api.Response {
+	fmt.Println("DEBUG: Creating user group...")
+	fmt.Printf("DEBUG: Request data: %s\n", req.Data)
+
+	var group struct {
+		ID      string   `json:"id"`
+		Name    string   `json:"name"`
+		Members []string `json:"members"`
+	}
+	if err := json.Unmarshal([]byte(req.Data), &group); err != nil {
+		fmt.Printf("DEBUG: Error decoding group data: %s\n", err.Error())
+		return api.Response{Success: false, Message: "Error decoding group data: " + err.Error()}
+	}
+
+	fmt.Printf("DEBUG: Parsed group - ID: %s, Name: %s, Members: %v\n",
+		group.ID, group.Name, group.Members)
+
+	if group.Name == "" {
+		fmt.Println("DEBUG: Group name is empty")
+		return api.Response{Success: false, Message: "Group name cannot be empty"}
+	}
+
+	// Generar un ID único para el grupo si no se proporciona
+	if group.ID == "" {
+		group.ID = uuid.New().String()
+		fmt.Printf("DEBUG: Generated new ID: %s\n", group.ID)
+	}
+
+	groupData, err := json.Marshal(group)
+	if err != nil {
+		fmt.Printf("DEBUG: Error serializing group data: %s\n", err.Error())
+		return api.Response{Success: false, Message: "Error serializing group data: " + err.Error()}
+	}
+
+	fmt.Printf("DEBUG: Serialized group data: %s\n", string(groupData))
+	fmt.Printf("DEBUG: Saving to bucket 'user_groups' with key '%s'\n", group.ID)
+
+	// Guardar el grupo en el bucket "user_groups"
+	if err := s.db.Put("user_groups", []byte(group.ID), groupData); err != nil {
+		fmt.Printf("DEBUG: Error saving group: %s\n", err.Error())
+		return api.Response{Success: false, Message: "Error saving group: " + err.Error()}
+	}
+
+	fmt.Println("DEBUG: Group saved successfully")
+
+	// Verificar que se guardó correctamente
+	savedData, err := s.db.Get("user_groups", []byte(group.ID))
+	if err != nil {
+		fmt.Printf("DEBUG: Error verifying saved group: %s\n", err.Error())
+	} else {
+		fmt.Printf("DEBUG: Verification - saved data: %s\n", string(savedData))
+	}
+
+	return api.Response{Success: true, Message: "Group created successfully", Data: group.ID}
+}
+
+// Corrección para handleDeleteUserGroup - Validar que el grupo existe antes de eliminarlo
+func (s *serverImpl) handleDeleteUserGroup(req api.Request) api.Response {
+	groupID := req.Data
+	if groupID == "" {
+		return api.Response{Success: false, Message: "Group ID cannot be empty"}
+	}
+
+	// Verificar que el grupo existe antes de intentar eliminarlo
+	_, err := s.db.Get("user_groups", []byte(groupID))
+	if err != nil {
+		return api.Response{Success: false, Message: "Group not found: " + err.Error()}
+	}
+
+	if err := s.db.Delete("user_groups", []byte(groupID)); err != nil {
+		return api.Response{Success: false, Message: "Error deleting group: " + err.Error()}
+	}
+
+	return api.Response{Success: true, Message: "Group deleted successfully"}
+}
+
+// Función de depuración para verificar el contenido del bucket "user_groups"
+// Puedes añadir esta función para depuración
+func (s *serverImpl) handleDebugListGroups(req api.Request) api.Response {
+	bs, ok := s.db.(*store.BboltStore)
+	if !ok {
+		return api.Response{Success: false, Message: "Store type assertion failed"}
+	}
+
+	var result strings.Builder
+	err := bs.DB.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("user_groups"))
+		if b == nil {
+			return fmt.Errorf("bucket not found: user_groups")
+		}
+
+		result.WriteString("DEBUG: Inspecting user_groups bucket...\n")
+		return b.ForEach(func(k, v []byte) error {
+			result.WriteString(fmt.Sprintf("Key: %x\n", k))
+			if v != nil {
+				result.WriteString(fmt.Sprintf("Value: %s\n", string(v)))
+			} else {
+				result.WriteString("Value: nil\n")
+			}
+			return nil
+		})
+	})
+
+	if err != nil {
+		return api.Response{Success: false, Message: "Error inspecting bucket: " + err.Error()}
+	}
+
+	return api.Response{Success: true, Message: "Bucket inspection completed", Data: result.String()}
 }
