@@ -784,7 +784,7 @@ func (s *serverImpl) restoreDatabase(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error counting database entries: " + err.Error()}
 	}
 
-	logging.Log(fmt.Sprintf("Backup restored for the user %s: %s", req.Username))
+	logging.Log(fmt.Sprintf("Backup restored for the user %s", req.Username))
 	return api.Response{
 		Success: true,
 		Message: fmt.Sprintf("Backup restored successfully. Total entries restored: %d", lineCount),
