@@ -107,7 +107,7 @@ func (c *client) runLoop() {
 			title = "Menu"
 		} else {
 			title = fmt.Sprintf(
-				"Menu (%s - role: \"%s\" - user_group: \"%s\")",
+				"Menu (username: \"%s\" - role: \"%s\" - user_group: \"%s\")",
 				c.currentUser,
 				c.currentRole,
 				c.currentGroup,
