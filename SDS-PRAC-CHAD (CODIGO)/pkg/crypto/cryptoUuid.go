@@ -11,10 +11,8 @@ import (
 	"path/filepath"
 )
 
-// uuidAESKey will hold the AES key for UUID encryption.
 var uuidAESKey []byte
 
-// init loads the AES key from keys/uuid.key. The key must be 32 bytes long.
 func init() {
 	keyPath := filepath.Join("keys", "uuid.key")
 	key, err := ioutil.ReadFile(keyPath)
@@ -27,8 +25,6 @@ func init() {
 	uuidAESKey = key
 }
 
-// EncryptUUID encrypts the given UUID string using AES-GCM with the loaded AES key.
-// It returns a base64 encoded string.
 func EncryptUUID(uuidStr string) (string, error) {
 	block, err := aes.NewCipher(uuidAESKey)
 	if err != nil {
@@ -47,7 +43,6 @@ func EncryptUUID(uuidStr string) (string, error) {
 	return base64.StdEncoding.EncodeToString(encrypted), nil
 }
 
-// DecryptUUID decrypts a base64 encoded string using AES-GCM with the loaded AES key.
 func DecryptUUID(ciphertextBase64 string) (string, error) {
 	data, err := base64.StdEncoding.DecodeString(ciphertextBase64)
 	if err != nil {
