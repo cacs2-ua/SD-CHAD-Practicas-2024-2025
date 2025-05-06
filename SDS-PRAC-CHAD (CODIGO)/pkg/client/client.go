@@ -356,16 +356,18 @@ func (c *client) registerUser() {
 		fmt.Println("Message:", resLogin.Message)
 		if resLogin.Success {
 			var responseData struct {
-				Username string `json:"username"`
-				Role     string `json:"role"`
+				Username  string `json:"username"`
+				Role      string `json:"role"`
+				UserGroup string `json:"user_group"`
 			}
-			if err := json.Unmarshal([]byte(res.Data), &responseData); err != nil {
-				fmt.Println("Error decoding response data:", err)
+			if err := json.Unmarshal([]byte(resLogin.Data), &responseData); err != nil {
+				fmt.Println("Error decoding login response data:", err)
 				return
 			}
 
 			c.currentUser = responseData.Username
 			c.currentRole = responseData.Role
+			c.currentGroup = responseData.UserGroup
 			// Remove "Bearer " prefix if present.
 			if strings.HasPrefix(accessToken, "Bearer ") {
 				accessToken = accessToken[7:]
@@ -745,13 +747,22 @@ func (c *client) sendRequest(req api.Request) (api.Response, string, string) {
 		return api.Response{Success: false, Message: "Request error"}, "", ""
 	}
 	request.Header.Set("Content-Type", "application/json")
-	switch req.Action {
-	case api.ActionFetchData, api.ActionUpdateData:
-		if c.authToken != "" {
+	if c.authToken != "" {
+		switch req.Action {
+		case api.ActionRegister,
+			api.ActionLogin,
+			api.ActionPublicKeyLogin,
+			api.ActionPublicKeyLoginResponse:
+			// estas peticiones no llevan Authorization
+		default:
 			request.Header.Set("Authorization", "Bearer "+c.authToken)
 		}
-	case api.ActionRefresh, api.ActionLogout:
-		if c.refreshToken != "" {
+	}
+
+	// Peticiones que sí usan el refresh-token
+	if c.refreshToken != "" {
+		switch req.Action {
+		case api.ActionRefresh, api.ActionLogout:
 			request.Header.Set("X-Refresh-Token", "Bearer "+c.refreshToken)
 		}
 	}

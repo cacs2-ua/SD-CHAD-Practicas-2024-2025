@@ -123,13 +123,6 @@ func hashPasswordSHA3(password string) string {
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-// hashRefreshToken returns the SHA3-256 hash (hex-encoded) of the refresh token.
-func hashRefreshToken(token string) string {
-	hasher := sha3.New256()
-	hasher.Write([]byte(token))
-	return hex.EncodeToString(hasher.Sum(nil))
-}
-
 // isValidEmail validates the email format using a regex.
 func isValidEmail(email string) bool {
 	re := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
