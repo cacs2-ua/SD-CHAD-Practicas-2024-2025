@@ -247,6 +247,8 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 			res = api.Response{Success: true, Message: "Public key login successful", Data: string(responseJSON)}
 			newAccessToken = accessToken
 			newRefreshToken = refreshToken
+			logging.Log("Public key login successful for user: " + req.Email)
+
 		}
 	case api.ActionRefresh:
 		res, newAccessToken, newRefreshToken = s.refreshToken(req, providedRefreshToken)
@@ -301,6 +303,7 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+
 	json.NewEncoder(w).Encode(res)
 }
 
@@ -418,6 +421,8 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 	}
 
 	responseJSON, _ := json.Marshal(responseData)
+
+	logging.Log("Usuario registrado: " + req.Username)
 
 	return api.Response{Success: true, Message: "User registered", Data: string(responseJSON)}
 }
@@ -605,6 +610,8 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 
 	responseJSON, _ := json.Marshal(responseData)
 
+	logging.Log("User " + username + " logged in successfully")
+
 	return api.Response{Success: true, Message: "Login successful", Data: string(responseJSON)}, accessToken, refreshToken
 }
 
@@ -642,6 +649,9 @@ func (s *serverImpl) refreshToken(req api.Request, providedRefreshToken string) 
 	if err := s.db.Put("cheese_refresh", keyUUID, newHashedRefresh); err != nil {
 		return api.Response{Success: false, Message: "Error updating refresh token"}, "", ""
 	}
+
+	logging.Log("Tokens refreshed for user: " + req.Username)
+
 	return api.Response{Success: true, Message: "Tokens refreshed successfully"}, newAccessToken, newRefreshToken
 }
 
@@ -662,6 +672,7 @@ func (s *serverImpl) fetchData(req api.Request, providedAccessToken string) api.
 	if err != nil {
 		return api.Response{Success: false, Message: "Error retrieving user data"}
 	}
+
 	return api.Response{
 		Success: true,
 		Message: "Private data for " + req.Username,
@@ -701,7 +712,11 @@ func (s *serverImpl) logoutUser(req api.Request, providedRefreshToken string) ap
 	if err := s.db.Delete("cheese_refresh", keyUUID); err != nil {
 		return api.Response{Success: false, Message: "Error closing session"}
 	}
+
+	logging.Log("This user has logged out: " + req.Username)
+
 	return api.Response{Success: true, Message: "Session closed successfully"}
+
 }
 
 // isAccessTokenValid verifies the token signature and expiration using the user UUID.
@@ -776,6 +791,8 @@ func (s *serverImpl) restoreDatabase(req api.Request) api.Response {
 	if err != nil {
 		return api.Response{Success: false, Message: "Error counting database entries: " + err.Error()}
 	}
+
+	logging.Log(fmt.Sprintf("Backup restored for the user %s: %s", req.Username))
 	return api.Response{
 		Success: true,
 		Message: fmt.Sprintf("Backup restored successfully. Total entries restored: %d", lineCount),
@@ -874,6 +891,7 @@ func (s *serverImpl) handleSendMessage(req api.Request) api.Response {
 	if err := s.db.Put(bucketMessages, []byte(messageKey), chatMsgBytes); err != nil {
 		return api.Response{Success: false, Message: "Error storing message: " + err.Error()}
 	}
+
 	return api.Response{Success: true, Message: "Message stored"}
 }
 
@@ -938,6 +956,7 @@ func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 	if err != nil {
 		return api.Response{Success: false, Message: "Error encoding messages"}
 	}
+
 	return api.Response{Success: true, Message: "Messages retrieved", Data: string(data)}
 }
 

@@ -12,37 +12,38 @@ estudiantes: 	**entregar**
 package main
 
 import (
-	"log"
+	stdlog "log"
 	"os"
 	"time"
 
 	"prac/pkg/client"
+	"prac/pkg/logging"
 	"prac/pkg/server"
 	"prac/pkg/ui"
 )
 
 func main() {
+	// Logger para main
+	logger := stdlog.New(os.Stdout, "[main] ", stdlog.LstdFlags)
 
-	// Creamos un logger con prefijo 'main' para identificar
-	// los mensajes en la consola.
-	log := log.New(os.Stdout, "[main] ", log.LstdFlags)
-
-	// Inicia servidor en goroutine.
-	log.Println("Iniciando servidor...")
+	logger.Println("Iniciando servidor...")
 	go func() {
 		if err := server.Run(); err != nil {
-			log.Fatalf("Error del servidor: %v\n", err)
+			logger.Fatalf("Error del servidor: %v\n", err)
 		}
 	}()
 
-	// Esperamos un tiempo prudencial a que arranque el servidor.
+	// Damos un pequeño margen para que arranque el servidor
 	const totalSteps = 20
 	for i := 1; i <= totalSteps; i++ {
 		ui.PrintProgressBar(i, totalSteps, 30)
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Inicia cliente.
-	log.Println("Iniciando cliente...")
+	// Ahora registramos también en Google Drive
+	logger.Println("Servidor arrancado en HTTPS en :9200")
+	logging.Log("Servidor arrancado en HTTPS en :9200")
+
+	logger.Println("Iniciando cliente...")
 	client.Run()
 }

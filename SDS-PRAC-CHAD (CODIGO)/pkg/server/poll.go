@@ -11,6 +11,8 @@ import (
 	"prac/pkg/store"
 
 	"github.com/google/uuid"
+
+	"prac/pkg/logging"
 )
 
 // Nombres de los buckets para las encuestas
@@ -96,6 +98,10 @@ func (s *serverImpl) handleCreatePoll(req api.Request, providedAccessToken strin
 		return api.Response{Success: false, Message: "Error al guardar la encuesta: " + err.Error()}
 	}
 
+	logging.Log(fmt.Sprintf(
+		"CREATE_POLL | user=%s | poll_id=%s | title=%q | group=%q | opts=%v | single=%t",
+		req.Username, poll.ID, poll.Title, poll.UserGroup, poll.Options, poll.SingleVote))
+
 	return api.Response{
 		Success: true,
 		Message: "Encuesta creada correctamente",
@@ -163,6 +169,10 @@ func (s *serverImpl) handleModifyPoll(req api.Request, providedAccessToken strin
 	if err := s.db.Put(bucketPolls, keyPoll, updatedPollData); err != nil {
 		return api.Response{Success: false, Message: "Error saving updated poll"}
 	}
+
+	logging.Log(fmt.Sprintf(
+		"MODIFY_POLL | user=%s | poll_id=%s | new_title=%q | new_group=%q | new_opts=%v | single=%t",
+		req.Username, existingPoll.ID, updatedPoll.Title, updatedPoll.UserGroup, updatedPoll.Options, updatedPoll.SingleVote))
 
 	return api.Response{Success: true, Message: "Poll updated successfully"}
 }
@@ -317,6 +327,8 @@ func (s *serverImpl) handleViewResults(req api.Request, providedAccessToken stri
 	if err != nil {
 		return api.Response{Success: false, Message: "Error al serializar los resultados: " + err.Error()}
 	}
+
+	logging.Log(fmt.Sprintf("VIEW_RESULTS | user=%s | poll_id=%s", req.Username, pollID))
 
 	return api.Response{
 		Success: true,

@@ -15,6 +15,8 @@ import (
 
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
+
+	"prac/pkg/logging"
 )
 
 const credentialsPath = "keys/credentials.json" // Ruta al archivo JSON con las credenciales
@@ -67,6 +69,8 @@ func BackupDatabase() error {
 	if err := os.Remove(encryptedBackupFile); err != nil {
 		return fmt.Errorf("error deleting encrypted backup file: %v", err)
 	}
+
+	logging.Log("Backup de base de datos creado")
 
 	return nil
 }
