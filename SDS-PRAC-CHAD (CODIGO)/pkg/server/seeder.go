@@ -76,7 +76,7 @@ func (s *serverImpl) seedPolls() {
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
 			Tags:       []string{"#versioncontrol", "#git", "#devops"},
-			SingleVote: true,
+			SingleVote: false,
 			UserGroup:  "programadores",
 		},
 
@@ -96,7 +96,7 @@ func (s *serverImpl) seedPolls() {
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
 			Tags:       []string{"#comida", "#almuerzo", "#preferencias"},
-			SingleVote: true,
+			SingleVote: false,
 			UserGroup:  "estudiantes",
 		},
 		{
@@ -105,7 +105,7 @@ func (s *serverImpl) seedPolls() {
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
 			Tags:       []string{"#educacion", "#materia", "#escuela"},
-			SingleVote: false,
+			SingleVote: true,
 			UserGroup:  "estudiantes",
 		},
 		{
@@ -141,7 +141,7 @@ func (s *serverImpl) seedPolls() {
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
 			Tags:       []string{"#entrenamiento", "#cardio", "#salud"},
-			SingleVote: false,
+			SingleVote: true,
 			UserGroup:  "deportistas",
 		},
 		{
@@ -149,7 +149,7 @@ func (s *serverImpl) seedPolls() {
 			Options:    []string{"FC Barcelona", "Real Madrid", "Atletico", "Valencia"},
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
-			SingleVote: true,
+			SingleVote: false,
 			UserGroup:  "deportistas",
 		},
 		{
@@ -186,7 +186,7 @@ func (s *serverImpl) seedPolls() {
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
 			Tags:       []string{"#debate", "#formato", "#competencia"},
-			SingleVote: true,
+			SingleVote: false,
 			UserGroup:  "oradores",
 		},
 		{
@@ -195,7 +195,7 @@ func (s *serverImpl) seedPolls() {
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
 			Tags:       []string{"#debate", "#temas", "#discusion"},
-			SingleVote: false,
+			SingleVote: true,
 			UserGroup:  "oradores",
 		},
 		{
@@ -204,7 +204,7 @@ func (s *serverImpl) seedPolls() {
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
 			Tags:       []string{"#oratoria", "#tiempo", "#presentacion"},
-			SingleVote: true,
+			SingleVote: false,
 			UserGroup:  "oradores",
 		},
 		{
@@ -223,7 +223,7 @@ func (s *serverImpl) seedPolls() {
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
 			Tags:       []string{"#comida", "#tortilla", "#gastronomia"},
-			SingleVote: true,
+			SingleVote: false,
 			UserGroup:  "",
 		},
 		{
@@ -258,7 +258,7 @@ func (s *serverImpl) seedPolls() {
 			EndDate:    time.Now().Add(24 * time.Hour),
 			CreatedBy:  "admin",
 			Tags:       []string{"#mascotas", "#animales", "#hogar"},
-			SingleVote: true,
+			SingleVote: false,
 			UserGroup:  "",
 		},
 	}
