@@ -259,6 +259,10 @@ func (s *serverImpl) handleVoteInPoll(req api.Request, providedAccessToken strin
 		return api.Response{Success: false, Message: "Error al registrar el voto: " + err.Error()}
 	}
 
+	logging.Log(fmt.Sprintf(
+		"VOTE_POLL | user=%s | poll_id=%s | choice_single=%q | choice_multi=%v",
+		req.Username, voteData.PollID, voteData.Option, voteData.Options))
+
 	return api.Response{
 		Success: true,
 		Message: "Voto registrado correctamente",
@@ -293,7 +297,7 @@ func (s *serverImpl) handleViewResults(req api.Request, providedAccessToken stri
 		return api.Response{Success: false, Message: "Error al serializar los resultados: " + err.Error()}
 	}
 
-	logging.Log(fmt.Sprintf("VIEW_RESULTS | user=%s | poll_id=%s", req.Username, pollID))
+	// logging.Log(fmt.Sprintf("VIEW_RESULTS | user=%s | poll_id=%s", req.Username, pollID))
 
 	return api.Response{
 		Success: true,
@@ -351,6 +355,8 @@ func (s *serverImpl) handleListPolls(req api.Request, providedAccessToken string
 	if err != nil {
 		return api.Response{Success: false, Message: "Error al serializar las encuestas: " + err.Error()}
 	}
+
+	// logging.Log(fmt.Sprintf("LIST_POLLS | user=%s | returned=%d", req.Username, len(polls)))
 
 	return api.Response{
 		Success: true,
