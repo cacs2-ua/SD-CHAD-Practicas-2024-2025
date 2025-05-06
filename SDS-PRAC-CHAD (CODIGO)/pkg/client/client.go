@@ -31,38 +31,31 @@ import (
 	"google.golang.org/api/option"
 )
 
-// client is an internal structure that controls the session state (user, tokens)
-// and holds the encryption key for end-to-end encryption.
 type client struct {
 	log               *log.Logger
 	currentUser       string
-	currentRole       string // Nuevo campo para almacenar el rol del usuario
-	authToken         string // access token
-	refreshToken      string // refresh token
+	currentRole       string
+	currentGroup      string
+	authToken         string
+	refreshToken      string
 	accessTokenExpiry time.Time
 	encryptionKey     []byte
-	plaintextPassword string // temporarily store password for key derivation
+	plaintextPassword string
 }
 
-// Run is the only exported function of this package.
-// It creates an internal client and starts the main loop.
 func Run() {
-	// Create a logger with the prefix 'cli' to identify messages on the console.
 	c := &client{
 		log: log.New(os.Stdout, "[cli] ", log.LstdFlags),
 	}
 	c.runLoop()
 }
 
-// parseTokenExpiry extracts the expiration time from a JWT access token.
-// It decodes the token payload (the second part) and returns the expiry as time.Time.
 func parseTokenExpiry(tokenStr string) (time.Time, error) {
 	parts := strings.Split(tokenStr, ".")
 	if len(parts) < 2 {
 		return time.Time{}, fmt.Errorf("invalid token format")
 	}
 	payload := parts[1]
-	// add padding if needed
 	missing := len(payload) % 4
 	if missing != 0 {
 		payload += strings.Repeat("=", 4-missing)
@@ -80,10 +73,7 @@ func parseTokenExpiry(tokenStr string) (time.Time, error) {
 	return time.Unix(claims.Exp, 0), nil
 }
 
-// runLoop handles the main menu logic.
-// It also starts a background goroutine to automatically refresh the access token.
 func (c *client) runLoop() {
-	// Start a background goroutine to auto-refresh the access token.
 	go func() {
 		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()
@@ -100,18 +90,20 @@ func (c *client) runLoop() {
 	for {
 		ui.ClearScreen()
 
-		// Build a title showing the logged in user, if any.
 		var title string
 		if c.currentUser == "" {
 			title = "Menu"
 		} else {
-			title = fmt.Sprintf("Menu (%s - %s)", c.currentUser, c.currentRole)
+			title = fmt.Sprintf(
+				"Menu (username: \"%s\" - role: \"%s\" - user_group: \"%s\")",
+				c.currentUser,
+				c.currentRole,
+				c.currentGroup,
+			)
 		}
 
-		// Generate options dynamically based on login state.
 		var options []string
 		if c.currentUser == "" {
-			// Not logged in: Register, Login, Login with public key, Exit
 			options = []string{
 				"Register user",
 				"Login",
@@ -119,7 +111,6 @@ func (c *client) runLoop() {
 				"Exit",
 			}
 		} else {
-			// Logged in: Generate menu based on role
 			switch c.currentRole {
 			case "normal":
 				options = []string{
@@ -171,12 +162,9 @@ func (c *client) runLoop() {
 			}
 		}
 
-		// Display the menu and get the user's choice.
 		choice := ui.PrintMenu(title, options)
 
-		// Map the chosen option based on login state.
 		if c.currentUser == "" {
-			// Not logged in.
 			switch choice {
 			case 1:
 				c.registerUser()
@@ -185,13 +173,11 @@ func (c *client) runLoop() {
 			case 3:
 				c.loginWithPublicKey()
 			case 4:
-				// Exit option.
 				c.log.Println("Exiting client...")
 				return
 			}
 
 		} else {
-			// Logged in: Handle actions based on role.
 			switch c.currentRole {
 			case "normal":
 				switch choice {
@@ -288,29 +274,38 @@ func (c *client) runLoop() {
 
 		}
 
-		// Pause so the user can see the results.
 		ui.Pause("Press [Enter] to continue...")
 	}
 }
 
-// isValidEmail validates the email format using a regex.
 func isValidEmail(email string) bool {
-	// simple regex for basic email validation
 	re := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 	return re.MatchString(email)
 }
 
-// registerUser requests credentials and sends them to the server for registration.
-// If registration is successful, it attempts an automatic login.
 func (c *client) registerUser() {
 	ui.ClearScreen()
 	fmt.Println("** User Registration **")
 
-	username := ui.ReadInput("Username")
+	rawUsername := ui.ReadInput("Username")
+	username := strings.TrimSpace(rawUsername)
 	if username == "" {
 		fmt.Println("Username cannot be empty")
 		return
 	}
+
+	rawUserGroup := ui.ReadInput("User group")
+	userGroup := strings.TrimSpace(rawUserGroup)
+	if userGroup == "" {
+		fmt.Println("User group cannot be empty")
+		return
+	}
+
+	if len(userGroup) < 4 {
+		fmt.Println("User group must have at least 4 characters")
+		return
+	}
+
 	if len(username) < 4 {
 		fmt.Println("Username must have at least 4 characters")
 		return
@@ -326,7 +321,8 @@ func (c *client) registerUser() {
 		return
 	}
 
-	password := ui.ReadPassword("Password")
+	rawPassword := ui.ReadPassword("Password")
+	password := strings.TrimSpace(rawPassword)
 	if password == "" {
 		fmt.Println("Password cannot be empty")
 		return
@@ -336,19 +332,17 @@ func (c *client) registerUser() {
 		return
 	}
 
-	// Send the registration request to the server.
 	res, _, _ := c.sendRequest(api.Request{
-		Action:   api.ActionRegister,
-		Username: username,
-		Email:    email,
-		Password: password,
+		Action:    api.ActionRegister,
+		Username:  username,
+		Email:     email,
+		Password:  password,
+		UserGroup: userGroup,
 	})
 
-	// Display the result.
 	fmt.Println("Success:", res.Success)
 	fmt.Println("Message:", res.Message)
 
-	// If successful, attempt automatic login.
 	if res.Success {
 		c.log.Println("Registration successful; attempting automatic login...")
 
@@ -361,17 +355,18 @@ func (c *client) registerUser() {
 		fmt.Println("Message:", resLogin.Message)
 		if resLogin.Success {
 			var responseData struct {
-				Username string `json:"username"`
-				Role     string `json:"role"`
+				Username  string `json:"username"`
+				Role      string `json:"role"`
+				UserGroup string `json:"user_group"`
 			}
-			if err := json.Unmarshal([]byte(res.Data), &responseData); err != nil {
-				fmt.Println("Error decoding response data:", err)
+			if err := json.Unmarshal([]byte(resLogin.Data), &responseData); err != nil {
+				fmt.Println("Error decoding login response data:", err)
 				return
 			}
 
 			c.currentUser = responseData.Username
 			c.currentRole = responseData.Role
-			// Remove "Bearer " prefix if present.
+			c.currentGroup = responseData.UserGroup
 			if strings.HasPrefix(accessToken, "Bearer ") {
 				accessToken = accessToken[7:]
 			}
@@ -385,21 +380,18 @@ func (c *client) registerUser() {
 
 			salt := "Leviathan-" + email
 
-			// Derive the encryption key using the password and email.
 			key, err := pcrypto.DeriveKey(email, salt, context)
 			if err != nil {
 				fmt.Println("Error deriving encryption key:", err)
 				return
 			}
 			c.encryptionKey = key
-			// Parse and store the access token expiry.
 			expiry, err := parseTokenExpiry(c.authToken)
 			if err != nil {
 				fmt.Println("Error parsing token expiry:", err)
 			} else {
 				c.accessTokenExpiry = expiry
 			}
-			// Store the plaintext password temporarily for future key derivation.
 			c.plaintextPassword = password
 			fmt.Println("Automatic login successful. Tokens and encryption key saved.")
 		} else {
@@ -408,7 +400,6 @@ func (c *client) registerUser() {
 	}
 }
 
-// loginUser requests credentials and performs login on the server.
 func (c *client) loginUser() {
 	ui.ClearScreen()
 	fmt.Println("** Login **")
@@ -442,12 +433,11 @@ func (c *client) loginUser() {
 	fmt.Println("Success:", res.Success)
 	fmt.Println("Message:", res.Message)
 
-	// If login is successful, save currentUser and the tokens.
 	if res.Success {
-		// Expecting the decrypted username in Data
 		var responseData struct {
-			Username string `json:"username"`
-			Role     string `json:"role"`
+			Username  string `json:"username"`
+			Role      string `json:"role"`
+			UserGroup string `json:"user_group"`
 		}
 		if err := json.Unmarshal([]byte(res.Data), &responseData); err != nil {
 			fmt.Println("Error decoding response data:", err)
@@ -456,6 +446,7 @@ func (c *client) loginUser() {
 
 		c.currentUser = responseData.Username
 		c.currentRole = responseData.Role
+		c.currentGroup = responseData.UserGroup
 
 		if strings.HasPrefix(accessToken, "Bearer ") {
 			accessToken = accessToken[7:]
@@ -469,21 +460,18 @@ func (c *client) loginUser() {
 		salt := "Leviathan-" + email
 
 		context := "LECHUGA-BONIATO-AUTH-" + email
-		// Derive the encryption key using the password and email.
 		key, err := pcrypto.DeriveKey(email, salt, context)
 		if err != nil {
 			fmt.Println("Error deriving encryption key:", err)
 			return
 		}
 		c.encryptionKey = key
-		// Parse and store the access token expiry.
 		expiry, err := parseTokenExpiry(c.authToken)
 		if err != nil {
 			fmt.Println("Error parsing token expiry:", err)
 		} else {
 			c.accessTokenExpiry = expiry
 		}
-		// Store the plaintext password temporarily.
 		c.plaintextPassword = password
 		fmt.Println("Login successful. Tokens and encryption key saved.")
 	}
@@ -503,7 +491,6 @@ func (c *client) loginWithPublicKey() {
 		return
 	}
 
-	// Send the request to initiate public key login.
 	res, _, _ := c.sendRequest(api.Request{
 		Action: api.ActionPublicKeyLogin,
 		Email:  email,
@@ -512,7 +499,6 @@ func (c *client) loginWithPublicKey() {
 		fmt.Println("Error initiating public key login:", res.Message)
 		return
 	}
-	// Parse the challenge and username from the response.
 	var dataObj map[string]string
 	if err := json.Unmarshal([]byte(res.Data), &dataObj); err != nil {
 		fmt.Println("Error parsing challenge data:", err)
@@ -526,17 +512,14 @@ func (c *client) loginWithPublicKey() {
 		return
 	}
 
-	// Store the role temporarily
 	c.currentRole = role
 
-	// Load the auth private key from keys/users-auth/<username>/private.pem.
 	authPrivKey, err := functionalities.LoadAuthPrivateKey(username)
 	if err != nil {
 		fmt.Println("Error loading auth private key:", err)
 		return
 	}
 
-	// Sign the challenge using RSA PKCS1v15 with SHA256.
 	hash := sha256.Sum256([]byte(challenge))
 	signature, err := rsa.SignPKCS1v15(rand.Reader, authPrivKey, crypto.SHA256, hash[:])
 	if err != nil {
@@ -545,7 +528,6 @@ func (c *client) loginWithPublicKey() {
 	}
 	signatureB64 := base64.StdEncoding.EncodeToString(signature)
 
-	// Send the signature back to the server.
 	resResp, accessToken, refreshToken := c.sendRequest(api.Request{
 		Action: api.ActionPublicKeyLoginResponse,
 		Email:  email,
@@ -555,16 +537,18 @@ func (c *client) loginWithPublicKey() {
 	fmt.Println("Message:", resResp.Message)
 	if resResp.Success {
 		var responseData struct {
-			Username string `json:"username"`
-			Role     string `json:"role"`
+			Username  string `json:"username"`
+			Role      string `json:"role"`
+			UserGroup string `json:"user_group"`
 		}
-		if err := json.Unmarshal([]byte(res.Data), &responseData); err != nil {
+		if err := json.Unmarshal([]byte(resResp.Data), &responseData); err != nil {
 			fmt.Println("Error decoding response data:", err)
 			return
 		}
 
-		c.currentUser = responseData.Username
+		c.currentUser = username
 		c.currentRole = responseData.Role
+		c.currentGroup = responseData.UserGroup
 
 		if strings.HasPrefix(accessToken, "Bearer ") {
 			accessToken = accessToken[7:]
@@ -599,7 +583,6 @@ func (c *client) loginWithPublicKey() {
 
 // refreshAccessToken automatically requests new tokens using the refresh token.
 func (c *client) refreshAccessToken() {
-	// Do not proceed if there is no valid refresh token.
 	if c.currentUser == "" || c.refreshToken == "" {
 		return
 	}
@@ -619,7 +602,6 @@ func (c *client) refreshAccessToken() {
 		}
 		c.authToken = accessToken
 		c.refreshToken = refreshToken
-		// Update the access token expiry.
 		expiry, err := parseTokenExpiry(c.authToken)
 		if err != nil {
 			fmt.Println("Error parsing token expiry:", err)
@@ -630,13 +612,14 @@ func (c *client) refreshAccessToken() {
 	}
 }
 
-// fetchData requests private data from the server.
-// The server returns the encrypted data associated with the logged in user.
 func (c *client) fetchData() {
 	ui.ClearScreen()
 	fmt.Println("** Get User Data **")
 
+<<<<<<< HEAD
 	// Verificar si el usuario está autenticado
+=======
+>>>>>>> develop
 	if c.currentUser == "" || c.authToken == "" {
 		fmt.Println("Not logged in. Please log in first.")
 		return
@@ -651,7 +634,10 @@ func (c *client) fetchData() {
 	fmt.Println("Success:", res.Success)
 	fmt.Println("Message:", res.Message)
 
+<<<<<<< HEAD
 	// Si la solicitud fue exitosa, desencriptar y mostrar los datos
+=======
+>>>>>>> develop
 	if res.Success {
 		if res.Data != "" {
 			encryptedData, err := base64.StdEncoding.DecodeString(res.Data)
@@ -698,8 +684,6 @@ func (c *client) fetchData() {
 	}
 }
 
-// updateData requests new text and sends it to the server with ActionUpdateData.
-// The data is encrypted on the client side before sending.
 func (c *client) updateData() {
 	ui.ClearScreen()
 	fmt.Println("** Update User Data **")
@@ -709,16 +693,13 @@ func (c *client) updateData() {
 		return
 	}
 
-	// Read the new data.
 	newData := ui.ReadInput("Enter the content to store")
 
-	// Encrypt the data using the encryption key.
 	encryptedData, err := pcrypto.Encrypt([]byte(newData), c.encryptionKey)
 	if err != nil {
 		fmt.Println("Error encrypting data:", err)
 		return
 	}
-	// Encode the encrypted data to base64 for safe JSON transmission.
 	encodedData := base64.StdEncoding.EncodeToString(encryptedData)
 
 	res, _, _ := c.sendRequest(api.Request{
@@ -731,8 +712,6 @@ func (c *client) updateData() {
 	fmt.Println("Message:", res.Message)
 }
 
-// logoutUser calls the logout action on the server, and if successful,
-// clears the local session (currentUser, tokens, encryptionKey).
 func (c *client) logoutUser() {
 	ui.ClearScreen()
 	fmt.Println("** Logout **")
@@ -750,7 +729,6 @@ func (c *client) logoutUser() {
 	fmt.Println("Success:", res.Success)
 	fmt.Println("Message:", res.Message)
 
-	// If successful, clear the local session.
 	if res.Success {
 		c.currentUser = ""
 		c.authToken = ""
@@ -761,9 +739,6 @@ func (c *client) logoutUser() {
 	}
 }
 
-// sendRequest sends a JSON POST to the server URL and returns the decoded response,
-// along with the access and refresh tokens extracted from the response headers.
-// It is used for all actions.
 func (c *client) sendRequest(req api.Request) (api.Response, string, string) {
 	jsonData, _ := json.Marshal(req)
 	request, err := http.NewRequest("POST", "https://localhost:9200/api", bytes.NewBuffer(jsonData))
@@ -772,24 +747,29 @@ func (c *client) sendRequest(req api.Request) (api.Response, string, string) {
 		return api.Response{Success: false, Message: "Request error"}, "", ""
 	}
 	request.Header.Set("Content-Type", "application/json")
-	switch req.Action {
-	case api.ActionFetchData, api.ActionUpdateData:
-		if c.authToken != "" {
+	if c.authToken != "" {
+		switch req.Action {
+		case api.ActionRegister,
+			api.ActionLogin,
+			api.ActionPublicKeyLogin,
+			api.ActionPublicKeyLoginResponse:
+		default:
 			request.Header.Set("Authorization", "Bearer "+c.authToken)
 		}
-	case api.ActionRefresh, api.ActionLogout:
-		if c.refreshToken != "" {
+	}
+
+	if c.refreshToken != "" {
+		switch req.Action {
+		case api.ActionRefresh, api.ActionLogout:
 			request.Header.Set("X-Refresh-Token", "Bearer "+c.refreshToken)
 		}
 	}
 
-	// Create HTTP client with TLS verification disabled
 	clientHttp := &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
-	//clientHttp := &http.Client{}
 
 	resp, err := clientHttp.Do(request)
 	if err != nil {
@@ -807,7 +787,6 @@ func (c *client) sendRequest(req api.Request) (api.Response, string, string) {
 	return res, accessToken, refreshToken
 }
 
-// Create Backup
 func (c *client) createBackup() {
 	ui.ClearScreen()
 	fmt.Println("** Create Backup **")
@@ -820,25 +799,20 @@ func (c *client) createBackup() {
 	fmt.Println("Message:", res.Message)
 }
 
-// listBackupsFromGoogleDrive lists all backup files in the specified Google Drive folder.
 func listBackupsFromGoogleDrive(folderID string, credentialsPath string) (map[string]string, error) {
 	ctx := context.Background()
 
-	// Authenticate using the credentials JSON file.
 	srv, err := drive.NewService(ctx, option.WithCredentialsFile(credentialsPath))
 	if err != nil {
 		return nil, fmt.Errorf("error creating Google Drive service: %v", err)
 	}
 
-	// Query files in the folder.
 	query := fmt.Sprintf("'%s' in parents and trashed = false", folderID)
-	// filepath: /pkg/client/client.go
 	fileList, err := srv.Files.List().Q(query).Fields("files(id, name)").Do()
 	if err != nil {
 		return nil, fmt.Errorf("error listing files in Google Drive: %v", err)
 	}
 
-	// Cambiar el acceso a los archivos
 	files := make(map[string]string)
 	for _, file := range fileList.Files {
 		files[file.Name] = file.Id
@@ -847,15 +821,13 @@ func listBackupsFromGoogleDrive(folderID string, credentialsPath string) (map[st
 	return files, nil
 }
 
-// restoreBackupFromDrive allows the user to select and restore a backup from Google Drive.
 func (c *client) restoreBackupFromDrive() {
 	ui.ClearScreen()
 	fmt.Println("** Restore Backup from Google Drive **")
 
-	credentialsPath := "keys/credentials.json"           // Ruta al archivo JSON con las credenciales.
-	driveFolderID := "11gN_pH9h0RJkyQ19mZEtJLxVbEyH6ZFt" // ID de la carpeta de Google Drive.
+	credentialsPath := "keys/credentials.json"
+	driveFolderID := "11gN_pH9h0RJkyQ19mZEtJLxVbEyH6ZFt"
 
-	// Listar los backups disponibles.
 	files, err := listBackupsFromGoogleDrive(driveFolderID, credentialsPath)
 	if err != nil {
 		fmt.Println("Error listing backups:", err)
@@ -877,7 +849,6 @@ func (c *client) restoreBackupFromDrive() {
 	}
 	fmt.Println("Enter the number of the backup to restore, or 'q' to return to the main menu.")
 
-	// Solicitar la elección del usuario.
 	for {
 		input := ui.ReadInput("Select a backup to restore (or 'q' to quit)")
 		if strings.ToLower(input) == "q" {
@@ -894,13 +865,11 @@ func (c *client) restoreBackupFromDrive() {
 		selectedName := names[choice-1]
 		selectedID := files[selectedName]
 
-		// Enviar la solicitud para restaurar el backup.
 		res, _, _ := c.sendRequest(api.Request{
 			Action: api.ActionRestore,
 			Data:   selectedID,
 		})
 
-		// Mostrar el resultado.
 		fmt.Println("Success:", res.Success)
 		fmt.Println("Message:", res.Message)
 		return
@@ -912,7 +881,6 @@ func (c *client) messagesMenu() {
 	fmt.Println("      CHAT WITH OTHER USERS")
 	fmt.Println("---------------------------------")
 
-	// Request the list of usernames from the server.
 	res, _, _ := c.sendRequest(api.Request{
 		Action: api.ActionGetUsernames,
 	})
@@ -927,7 +895,6 @@ func (c *client) messagesMenu() {
 		return
 	}
 
-	// Filter out the current user.
 	var availableUsers []string
 	for _, user := range usernames {
 		if user != c.currentUser {
@@ -954,14 +921,11 @@ func (c *client) messagesMenu() {
 	fmt.Printf("  Conversation with %s\n", recipient)
 	fmt.Println("---------------------------------")
 
-	// Start conversation view.
 	c.conversationView(recipient)
 }
 
-// conversationView handles a chat conversation with the specified recipient.
 func (c *client) conversationView(recipient string) {
 	for {
-		// Retrieve chat history from the server.
 		res, _, _ := c.sendRequest(api.Request{
 			Action:   api.ActionGetMessages,
 			Username: recipient,
@@ -1105,7 +1069,6 @@ func (c *client) viewLogs() {
 	}
 	fmt.Println("Selecciona un log para ver su contenido o presiona 'q' para volver al menú principal.")
 
-	// Solicitar la elección del usuario.
 	for {
 		input := ui.ReadInput("Selecciona un log (o 'q' para salir)")
 		if strings.ToLower(input) == "q" {
@@ -1122,21 +1085,18 @@ func (c *client) viewLogs() {
 		selectedName := names[choice-1]
 		selectedID := files[selectedName]
 
-		// Descargar el log desde Google Drive.
 		tempFilePath := filepath.Join(os.TempDir(), selectedName)
 		if err := logging.DownloadLogFromGoogleDrive(selectedID, tempFilePath, credentialsPath); err != nil {
 			fmt.Println("Error al descargar el log:", err)
 			return
 		}
 
-		// Desencriptar el log.
 		decryptedFilePath := tempFilePath + ".dec"
 		if err := logging.DecryptFile(tempFilePath, decryptedFilePath, "keys/logs_encryption.key"); err != nil {
 			fmt.Println("Error al desencriptar el log:", err)
 			return
 		}
 
-		// Mostrar el contenido del log.
 		content, err := os.ReadFile(decryptedFilePath)
 		if err != nil {
 			fmt.Println("Error al leer el log desencriptado:", err)
@@ -1148,14 +1108,12 @@ func (c *client) viewLogs() {
 		fmt.Println("\nPresiona 'q' para volver al menú principal.")
 		ui.ReadInput("")
 
-		// Limpiar archivos temporales.
 		os.Remove(tempFilePath)
 		os.Remove(decryptedFilePath)
 		return
 	}
 }
 
-// banMenu allows moderators to ban or unban users.
 func (c *client) banMenu() {
 	ui.ClearScreen()
 	fmt.Println("** Ban/Unban Users **")
@@ -1164,14 +1122,13 @@ func (c *client) banMenu() {
 	choice := ui.PrintMenu("Ban/Unban Menu", options)
 
 	switch choice {
-	case 1: // Ban a user
+	case 1:
 		username := c.selectUser("Select a user to ban")
 		if username == "" {
 			fmt.Println("No user selected.")
 			return
 		}
 
-		// Check if the user is already banned
 		statusRes, _, _ := c.sendRequest(api.Request{
 			Action:   api.ActionCheckBanStatus,
 			Username: username,
@@ -1181,7 +1138,6 @@ func (c *client) banMenu() {
 			return
 		}
 
-		// Proceed to ban the user
 		res, _, _ := c.sendRequest(api.Request{
 			Action:   api.ActionBanUser,
 			Username: username,
@@ -1189,14 +1145,13 @@ func (c *client) banMenu() {
 		fmt.Println("Success:", res.Success)
 		fmt.Println("Message:", res.Message)
 
-	case 2: // Unban a user
+	case 2:
 		username := c.selectUser("Select a user to unban")
 		if username == "" {
 			fmt.Println("No user selected.")
 			return
 		}
 
-		// Check if the user is not banned
 		statusRes, _, _ := c.sendRequest(api.Request{
 			Action:   api.ActionCheckBanStatus,
 			Username: username,
@@ -1206,7 +1161,6 @@ func (c *client) banMenu() {
 			return
 		}
 
-		// Proceed to unban the user
 		res, _, _ := c.sendRequest(api.Request{
 			Action:   api.ActionUnbanUser,
 			Username: username,
@@ -1214,14 +1168,12 @@ func (c *client) banMenu() {
 		fmt.Println("Success:", res.Success)
 		fmt.Println("Message:", res.Message)
 
-	case 3: // Back
+	case 3:
 		return
 	}
 }
 
-// Helper function to fetch and display a list of users for selection.
 func (c *client) selectUser(prompt string) string {
-	// Request the list of usernames from the server.
 	res, _, _ := c.sendRequest(api.Request{
 		Action: api.ActionGetUsernames,
 	})
@@ -1241,13 +1193,11 @@ func (c *client) selectUser(prompt string) string {
 		return ""
 	}
 
-	// Display the list of users.
 	fmt.Println(prompt)
 	for i, name := range usernames {
 		fmt.Printf("%d. %s\n", i+1, name)
 	}
 
-	// Let the user select a user.
 	choice := ui.ReadInt("Select a user")
 	if choice < 1 || choice > len(usernames) {
 		fmt.Println("Invalid choice.")
@@ -1261,7 +1211,6 @@ func (c *client) modifyUserRole() {
 	ui.ClearScreen()
 	fmt.Println("** Modify User Role **")
 
-	// Request the list of users from the server
 	res, _, _ := c.sendRequest(api.Request{
 		Action: api.ActionGetUsernames,
 	})
@@ -1281,13 +1230,11 @@ func (c *client) modifyUserRole() {
 		return
 	}
 
-	// Display the list of users
 	fmt.Println("Available Users:")
 	for i, name := range usernames {
 		fmt.Printf("%d. %s\n", i+1, name)
 	}
 
-	// Ask the administrator to select a user
 	choice := ui.ReadInt("Select a user to modify their role")
 	if choice < 1 || choice > len(usernames) {
 		fmt.Println("Invalid choice.")
@@ -1295,7 +1242,6 @@ func (c *client) modifyUserRole() {
 	}
 	selectedUser := usernames[choice-1]
 
-	// Request the current role of the selected user
 	roleRes, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionFetchUserRole,
 		Username: selectedUser,
@@ -1306,13 +1252,11 @@ func (c *client) modifyUserRole() {
 	}
 	currentRole := roleRes.Data
 
-	// Check if the selected user is an admin
 	if currentRole == "admin" {
 		fmt.Printf("The user '%s' is an admin. You cannot modify their role.\n", selectedUser)
 		return
 	}
 
-	// Ask for the new role
 	fmt.Println("Available roles:")
 	fmt.Println("1. normal")
 	fmt.Println("2. moderator")
@@ -1328,20 +1272,17 @@ func (c *client) modifyUserRole() {
 		return
 	}
 
-	// Check if the selected role is the same as the current role
 	if newRole == currentRole {
 		fmt.Printf("The user '%s' already has the role '%s'. No changes were made.\n", selectedUser, currentRole)
 		return
 	}
 
-	// Send the request to the server to modify the role
 	resUpdate, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionModifyUserRole,
 		Username: selectedUser,
 		Data:     newRole,
 	})
 
-	// Display the result
 	fmt.Println("Success:", resUpdate.Success)
 	fmt.Println("Message:", resUpdate.Message)
 }

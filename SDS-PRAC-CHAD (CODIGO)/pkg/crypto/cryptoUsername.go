@@ -13,8 +13,6 @@ import (
 
 var usernameAESKey []byte
 
-// init loads the AES key for username encryption from keys/username.key.
-// The key must be 32 bytes long.
 func init() {
 	keyPath := filepath.Join("keys", "username.key")
 	key, err := ioutil.ReadFile(keyPath)
@@ -27,8 +25,6 @@ func init() {
 	usernameAESKey = key
 }
 
-// EncryptUsername encrypts the given username string using AES-GCM-256 with the loaded AES key.
-// It returns a base64 encoded string.
 func EncryptUsername(username string) (string, error) {
 	block, err := aes.NewCipher(usernameAESKey)
 	if err != nil {
@@ -47,7 +43,6 @@ func EncryptUsername(username string) (string, error) {
 	return base64.StdEncoding.EncodeToString(encrypted), nil
 }
 
-// DecryptUsername decrypts a base64 encoded string using AES-GCM-256 with the loaded AES key.
 func DecryptUsername(ciphertextBase64 string) (string, error) {
 	data, err := base64.StdEncoding.DecodeString(ciphertextBase64)
 	if err != nil {

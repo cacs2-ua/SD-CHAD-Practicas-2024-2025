@@ -9,7 +9,6 @@ import (
 	"golang.org/x/term"
 )
 
-// PrintMenu prints a menu and asks the user to select an option.
 func PrintMenu(title string, options []string) int {
 	fmt.Print(title, "\n\n")
 	for i, option := range options {
@@ -29,7 +28,6 @@ func PrintMenu(title string, options []string) int {
 	return choice
 }
 
-// ReadInput asks the user for input and returns it as a string.
 func ReadInput(prompt string) string {
 	fmt.Print(prompt + ": ")
 	scanner := bufio.NewScanner(os.Stdin)
@@ -37,10 +35,8 @@ func ReadInput(prompt string) string {
 	return strings.TrimSpace(scanner.Text())
 }
 
-// ReadPassword asks the user for password input and masks the input with asterisks.
 func ReadPassword(prompt string) string {
 	fmt.Print(prompt + ": ")
-	// Set terminal to raw mode.
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		fmt.Println("Error setting terminal to raw mode:", err)
@@ -55,20 +51,16 @@ func ReadPassword(prompt string) string {
 		if err != nil || n == 0 {
 			break
 		}
-		// Break on newline or carriage return.
 		if buf[0] == '\r' || buf[0] == '\n' {
 			break
 		}
-		// Handle backspace (8 or 127).
 		if buf[0] == 8 || buf[0] == 127 {
 			if len(password) > 0 {
 				password = password[:len(password)-1]
-				// Move cursor back, print space, move cursor back again.
 				fmt.Print("\b \b")
 			}
 			continue
 		}
-		// Append character and print asterisk.
 		password = append(password, rune(buf[0]))
 		fmt.Print("*")
 	}
@@ -76,7 +68,6 @@ func ReadPassword(prompt string) string {
 	return string(password)
 }
 
-// Confirm asks the user for a yes/no confirmation.
 func Confirm(message string) bool {
 	for {
 		fmt.Print(message + " (Y/N): ")
@@ -92,18 +83,15 @@ func Confirm(message string) bool {
 	}
 }
 
-// ClearScreen clears the terminal screen.
 func ClearScreen() {
 	fmt.Print("\033[H\033[2J")
 }
 
-// Pause shows a message and waits for the user to press Enter.
 func Pause(prompt string) {
 	fmt.Println(prompt)
 	bufio.NewScanner(os.Stdin).Scan()
 }
 
-// ReadInt asks the user for an integer and validates the input.
 func ReadInt(prompt string) int {
 	for {
 		fmt.Print(prompt + ": ")
@@ -117,7 +105,6 @@ func ReadInt(prompt string) int {
 	}
 }
 
-// ReadFloat asks the user for a float and validates the input.
 func ReadFloat(prompt string) float64 {
 	for {
 		fmt.Print(prompt + ": ")
@@ -131,7 +118,6 @@ func ReadFloat(prompt string) float64 {
 	}
 }
 
-// ReadMultiline reads multiple lines until the user enters an empty line.
 func ReadMultiline(prompt string) string {
 	fmt.Println(prompt + " (enter an empty line to finish):")
 	scanner := bufio.NewScanner(os.Stdin)
@@ -147,7 +133,6 @@ func ReadMultiline(prompt string) string {
 	return strings.Join(lines, "\n")
 }
 
-// PrintProgressBar displays a progress bar in the terminal.
 func PrintProgressBar(progress, total int, width int) {
 	percent := float64(progress) / float64(total) * 100.0
 	filled := int(float64(width) * (float64(progress) / float64(total)))
