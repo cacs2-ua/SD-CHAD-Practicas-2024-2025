@@ -444,10 +444,6 @@ func createDefaultUsers(db store.Store) error {
 		role      string
 		userGroup string
 	}{
-<<<<<<< HEAD
-		{"admin11com", "admin1", "admin1admin1", "admin"},
-		{"moderator1@gmail.com", "moderator1", "moderator1", "moderator"},
-=======
 		{"admin1@gmail.com", "admin1", "admin1admin1", "admin", "admin"},
 		{"moderator1@gmail.com", "moderator1", "moderator1", "moderator", "moderator"},
 
@@ -455,7 +451,6 @@ func createDefaultUsers(db store.Store) error {
 		{"estudiante1@gmail.com", "estudiante1", "estudiante1", "normal", "estudiantes"},
 		{"deportista1@gmail.com", "deportista1", "deportista1", "normal", "deportistas"},
 		{"chadorador1@gmail.com", "chadorador1", "chadorador1", "normal", "oradores"},
->>>>>>> develop
 	}
 
 	for _, user := range defaultUsers {

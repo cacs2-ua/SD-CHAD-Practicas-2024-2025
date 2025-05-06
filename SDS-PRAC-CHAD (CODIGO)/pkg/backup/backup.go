@@ -26,6 +26,7 @@ const dbPath = "data/server.db"
 
 func BackupDatabase() error {
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		logging.Log(fmt.Sprintf("Error creating backup directory: %v", err))
 		return fmt.Errorf("error creating backup directory: %v", err)
 	}
 
@@ -34,30 +35,36 @@ func BackupDatabase() error {
 
 	srcFile, err := os.Open(dbPath)
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error opening database file: %v", err))
 		return fmt.Errorf("error opening database file: %v", err)
 	}
 	defer srcFile.Close()
 
 	destFile, err := os.Create(backupFile)
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error creating backup file: %v", err))
 		return fmt.Errorf("error creating backup file: %v", err)
 	}
 	defer destFile.Close()
 
 	if _, err := io.Copy(destFile, srcFile); err != nil {
+		logging.Log(fmt.Sprintf("Error copying database file: %v", err))
 		return fmt.Errorf("error copying database file: %v", err)
 	}
 
 	encryptedBackupFile := backupFile + ".enc"
 	if err := encryptFile(backupFile, encryptedBackupFile, "keys/db_encryption.key"); err != nil {
+		logging.Log(fmt.Sprintf("Error encrypting backup file: %v", err))
 		return fmt.Errorf("error encrypting backup file: %v", err)
 	}
 
 	if err := uploadToGoogleDrive(encryptedBackupFile, driveFolderID, credentialsPath); err != nil {
+		logging.Log(fmt.Sprintf("Error uploading encrypted backup to Google Drive: %v", err))
 		return fmt.Errorf("error uploading encrypted backup to Google Drive: %v", err)
 	}
 
 	if err := os.Remove(encryptedBackupFile); err != nil {
+		logging.Log(fmt.Sprintf("Error deleting encrypted backup file: %v", err))
 		return fmt.Errorf("error deleting encrypted backup file: %v", err)
 	}
 
@@ -71,11 +78,13 @@ func uploadToGoogleDrive(filePath string, folderID string, credentialsPath strin
 
 	srv, err := drive.NewService(ctx, option.WithCredentialsFile(credentialsPath))
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error creating Google Drive service: %v", err))
 		return fmt.Errorf("error creating Google Drive service: %v", err)
 	}
 
 	file, err := os.Open(filePath)
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error opening file for upload: %v", err))
 		return fmt.Errorf("error opening file for upload: %v", err)
 	}
 	defer file.Close()
@@ -87,9 +96,11 @@ func uploadToGoogleDrive(filePath string, folderID string, credentialsPath strin
 
 	_, err = srv.Files.Create(fileMetadata).Media(file).Do()
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error uploading file to Google Drive: %v", err))
 		return fmt.Errorf("error uploading file to Google Drive: %v", err)
 	}
 
+	logging.Log("Backup uploaded to Google Drive successfully")
 	return nil
 }
 
@@ -98,40 +109,48 @@ func DownloadBackupFromGoogleDrive(fileID string, destinationPath string) error 
 
 	srv, err := drive.NewService(ctx, option.WithCredentialsFile(credentialsPath))
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error creating Google Drive service: %v", err))
 		return fmt.Errorf("error creating Google Drive service: %v", err)
 	}
 
 	encryptedFilePath := destinationPath + ".enc"
 	resp, err := srv.Files.Get(fileID).Download()
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error downloading file from Google Drive: %v", err))
 		return fmt.Errorf("error downloading file from Google Drive: %v", err)
 	}
 	defer resp.Body.Close()
 
 	encFile, err := os.Create(encryptedFilePath)
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error creating encrypted file: %v", err))
 		return fmt.Errorf("error creating encrypted file: %v", err)
 	}
 	defer encFile.Close()
 
 	if _, err := io.Copy(encFile, resp.Body); err != nil {
+		logging.Log(fmt.Sprintf("Error writing encrypted file: %v", err))
 		return fmt.Errorf("error saving encrypted file: %v", err)
 	}
 
 	if err := decryptFile(encryptedFilePath, destinationPath, "keys/db_encryption.key"); err != nil {
+		logging.Log(fmt.Sprintf("Error decrypting file: %v", err))
 		return fmt.Errorf("error decrypting file: %v", err)
 	}
 
 	if err := os.Remove(encryptedFilePath); err != nil {
+		logging.Log(fmt.Sprintf("Error deleting encrypted file: %v", err))
 		return fmt.Errorf("error deleting encrypted file: %v", err)
 	}
 
+	logging.Log("Backup downloaded and decrypted successfully")
 	return nil
 }
 
 func encryptFile(inputPath, outputPath, keyPath string) error {
 	key, err := os.ReadFile(keyPath)
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error reading encryption key: %v", err))
 		return fmt.Errorf("error reading encryption key: %v", err)
 	}
 
@@ -139,32 +158,38 @@ func encryptFile(inputPath, outputPath, keyPath string) error {
 
 	keyBytes, err := hex.DecodeString(keyStr)
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error decoding encryption key: %v", err))
 		return fmt.Errorf("error decoding encryption key: %v", err)
 	}
 
 	inputFile, err := os.Open(inputPath)
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error opening input file: %v", err))
 		return fmt.Errorf("error opening input file: %v", err)
 	}
 	defer inputFile.Close()
 
 	outputFile, err := os.Create(outputPath)
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error creating output file: %v", err))
 		return fmt.Errorf("error creating output file: %v", err)
 	}
 	defer outputFile.Close()
 
 	block, err := aes.NewCipher(keyBytes)
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error creating AES cipher: %v", err))
 		return fmt.Errorf("error creating AES cipher: %v", err)
 	}
 
 	iv := make([]byte, aes.BlockSize)
 	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		logging.Log(fmt.Sprintf("Error generating IV: %v", err))
 		return fmt.Errorf("error generating IV: %v", err)
 	}
 
 	if _, err := outputFile.Write(iv); err != nil {
+		logging.Log(fmt.Sprintf("Error writing IV to output file: %v", err))
 		return fmt.Errorf("error writing IV to output file: %v", err)
 	}
 
@@ -172,8 +197,11 @@ func encryptFile(inputPath, outputPath, keyPath string) error {
 
 	writer := &cipher.StreamWriter{S: stream, W: outputFile}
 	if _, err := io.Copy(writer, inputFile); err != nil {
+		logging.Log(fmt.Sprintf("Error encrypting file: %v", err))
 		return fmt.Errorf("error encrypting file: %v", err)
 	}
+
+	logging.Log("File encrypted successfully")
 
 	return nil
 }
@@ -181,6 +209,7 @@ func encryptFile(inputPath, outputPath, keyPath string) error {
 func decryptFile(inputPath, outputPath, keyPath string) error {
 	key, err := os.ReadFile(keyPath)
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error reading decryption key: %v", err))
 		return fmt.Errorf("error reading decryption key: %v", err)
 	}
 
@@ -188,28 +217,33 @@ func decryptFile(inputPath, outputPath, keyPath string) error {
 
 	keyBytes, err := hex.DecodeString(keyStr)
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error decoding decryption key: %v", err))
 		return fmt.Errorf("error decoding decryption key: %v", err)
 	}
 
 	inputFile, err := os.Open(inputPath)
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error opening input file: %v", err))
 		return fmt.Errorf("error opening input file: %v", err)
 	}
 	defer inputFile.Close()
 
 	outputFile, err := os.Create(outputPath)
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error creating output file: %v", err))
 		return fmt.Errorf("error creating output file: %v", err)
 	}
 	defer outputFile.Close()
 
 	iv := make([]byte, aes.BlockSize)
 	if _, err := io.ReadFull(inputFile, iv); err != nil {
+		logging.Log(fmt.Sprintf("Error reading IV: %v", err))
 		return fmt.Errorf("error reading IV: %v", err)
 	}
 
 	block, err := aes.NewCipher(keyBytes)
 	if err != nil {
+		logging.Log(fmt.Sprintf("Error creating AES cipher: %v", err))
 		return fmt.Errorf("error creating AES cipher: %v", err)
 	}
 
@@ -217,8 +251,11 @@ func decryptFile(inputPath, outputPath, keyPath string) error {
 
 	reader := &cipher.StreamReader{S: stream, R: inputFile}
 	if _, err := io.Copy(outputFile, reader); err != nil {
+		logging.Log(fmt.Sprintf("Error decrypting file: %v", err))
 		return fmt.Errorf("error decrypting file: %v", err)
 	}
+
+	logging.Log("File decrypted successfully")
 
 	return nil
 }

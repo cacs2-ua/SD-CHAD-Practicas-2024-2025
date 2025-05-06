@@ -616,10 +616,7 @@ func (c *client) fetchData() {
 	ui.ClearScreen()
 	fmt.Println("** Get User Data **")
 
-<<<<<<< HEAD
 	// Verificar si el usuario está autenticado
-=======
->>>>>>> develop
 	if c.currentUser == "" || c.authToken == "" {
 		fmt.Println("Not logged in. Please log in first.")
 		return
@@ -634,10 +631,7 @@ func (c *client) fetchData() {
 	fmt.Println("Success:", res.Success)
 	fmt.Println("Message:", res.Message)
 
-<<<<<<< HEAD
 	// Si la solicitud fue exitosa, desencriptar y mostrar los datos
-=======
->>>>>>> develop
 	if res.Success {
 		if res.Data != "" {
 			encryptedData, err := base64.StdEncoding.DecodeString(res.Data)
@@ -866,8 +860,9 @@ func (c *client) restoreBackupFromDrive() {
 		selectedID := files[selectedName]
 
 		res, _, _ := c.sendRequest(api.Request{
-			Action: api.ActionRestore,
-			Data:   selectedID,
+			Action:   api.ActionRestore,
+			Data:     selectedID,
+			Username: c.currentUser,
 		})
 
 		fmt.Println("Success:", res.Success)
