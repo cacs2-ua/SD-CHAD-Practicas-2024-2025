@@ -13,14 +13,11 @@ import (
 )
 
 func (s *serverImpl) vaciabd(bs *store.BboltStore) {
-	// Elimina los buckets de encuestas
 	err := bs.DB.Update(func(tx *bbolt.Tx) error {
-		// Elimina el bucket de encuestas
 		if err := tx.DeleteBucket(store.BucketName("polls")); err != nil && err != bbolt.ErrBucketNotFound {
 			return fmt.Errorf("error al eliminar bucket polls: %v", err)
 		}
 
-		// Elimina el bucket de votos de usuarios
 		if err := tx.DeleteBucket(store.BucketName("user_votes")); err != nil && err != bbolt.ErrBucketNotFound {
 			return fmt.Errorf("error al eliminar bucket user_votes: %v", err)
 		}
@@ -267,7 +264,6 @@ func (s *serverImpl) seedPolls() {
 	}
 
 	for _, poll := range samplePolls {
-		// Generar UUID y encriptarlo
 		pollUUID := uuid.New().String()
 		encryptedID, err := crypto.EncryptUUID(pollUUID)
 		if err != nil {
@@ -276,13 +272,11 @@ func (s *serverImpl) seedPolls() {
 		}
 		poll.ID = encryptedID
 
-		// Inicializar mapa de votos
 		poll.Votes = make(map[string]int)
 		for _, option := range poll.Options {
 			poll.Votes[option] = 0
 		}
 
-		// Serializar y guardar
 		pollBytes, err := json.Marshal(poll)
 		if err != nil {
 			fmt.Println("❌ Error al serializar encuesta:", err)

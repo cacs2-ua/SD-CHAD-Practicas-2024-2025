@@ -24,13 +24,11 @@ import (
 
 const bucketAuthUUID = "cheese_auth_uuid"
 
-// AuthKeyData holds the auth key information.
 type AuthKeyData struct {
 	Username  string `json:"username"`
 	PublicKey string `json:"public_key"`
 }
 
-// nonceInfo stores the nonce challenge and its timestamp.
 type nonceInfo struct {
 	Nonce     string
 	Timestamp time.Time
@@ -41,9 +39,6 @@ var (
 	nonceMu  sync.Mutex
 )
 
-// GenerateAuthKeyPair generates an RSA key pair for public key authentication.
-// It saves the private key in keys/users-auth/<username>/private.pem and the public key in keys/users-auth/<username>/public.pem.
-// The public key is then encrypted and stored in the DB bucket "auth_public_keys" using the hashed user UUID as key.
 func GenerateAuthKeyPair(db store.Store, username, userUUID string) error {
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -51,14 +46,12 @@ func GenerateAuthKeyPair(db store.Store, username, userUUID string) error {
 	}
 	pubKey := &privKey.PublicKey
 
-	// Encode private key to PEM
 	privBytes := x509.MarshalPKCS1PrivateKey(privKey)
 	privPem := pem.EncodeToMemory(&pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: privBytes,
 	})
 
-	// Encode public key to PEM
 	pubBytes, err := x509.MarshalPKIXPublicKey(pubKey)
 	if err != nil {
 		return fmt.Errorf("error marshaling public key: %v", err)
@@ -68,7 +61,6 @@ func GenerateAuthKeyPair(db store.Store, username, userUUID string) error {
 		Bytes: pubBytes,
 	})
 
-	// Save private key to file: keys/users-auth/<username>/private.pem
 	dirPath := filepath.Join("keys", "users-auth", username)
 	if err := os.MkdirAll(dirPath, 0700); err != nil {
 		return fmt.Errorf("error creating auth keys directory: %v", err)
@@ -77,13 +69,12 @@ func GenerateAuthKeyPair(db store.Store, username, userUUID string) error {
 	if err := ioutil.WriteFile(privKeyPath, privPem, 0600); err != nil {
 		return fmt.Errorf("error writing private key: %v", err)
 	}
-	// Save public key to file: keys/users-auth/<username>/public.pem
+
 	pubKeyPath := filepath.Join(dirPath, "public.pem")
 	if err := ioutil.WriteFile(pubKeyPath, pubPem, 0644); err != nil {
 		return fmt.Errorf("error writing public key: %v", err)
 	}
 
-	// Prepare auth key data to store in DB
 	authData := AuthKeyData{
 		Username:  username,
 		PublicKey: string(pubPem),
@@ -92,24 +83,19 @@ func GenerateAuthKeyPair(db store.Store, username, userUUID string) error {
 	if err != nil {
 		return fmt.Errorf("error marshaling auth key data: %v", err)
 	}
-	// Encrypt the auth key data using server encryption
+
 	encryptedData, err := pcrypto.EncryptServer(authDataBytes)
 	if err != nil {
 		return fmt.Errorf("error encrypting auth key data: %v", err)
 	}
-	// Store in DB bucket "auth_public_keys" with key = HashBytes(userUUID)
+
 	if err := db.Put("auth_public_keys", store.HashBytes([]byte(userUUID)), encryptedData); err != nil {
 		return fmt.Errorf("error storing auth public key in DB: %v", err)
 	}
 	return nil
 }
 
-// InitiatePublicKeyLogin retrieves the auth public key data for the given email.
-// It first retrieves the encrypted UUID from the "cheese_auth_uuid" bucket (keyed by hashed email),
-// then decrypts it to obtain the user UUID. Next, it retrieves the auth public key using the hashed user UUID.
-// Finally, it generates a nonce challenge, stores it, and returns the nonce and username.
 func InitiatePublicKeyLogin(db store.Store, email string) (string, string, string, error) {
-	// Retrieve encrypted UUID from bucketAuthUUID using hashed email.
 	encryptedUUID, err := db.Get(bucketAuthUUID, store.HashBytes([]byte(email)))
 	if err != nil {
 		return "", "", "", errors.New("user not found for public key login")
@@ -118,7 +104,6 @@ func InitiatePublicKeyLogin(db store.Store, email string) (string, string, strin
 	if err != nil {
 		return "", "", "", fmt.Errorf("error decrypting user UUID: %v", err)
 	}
-	// Retrieve auth public key from "auth_public_keys" using hashed userUUID.
 	encryptedData, err := db.Get("auth_public_keys", store.HashBytes([]byte(userUUID)))
 	if err != nil {
 		return "", "", "", errors.New("auth public key not found")
@@ -132,14 +117,12 @@ func InitiatePublicKeyLogin(db store.Store, email string) (string, string, strin
 		return "", "", "", fmt.Errorf("error unmarshaling auth key data: %v", err)
 	}
 
-	// Retrieve the role of the user
 	keyUUID := store.HashBytes([]byte(userUUID))
 	role, err := db.Get("cheese_roles", keyUUID)
 	if err != nil {
 		return "", "", "", fmt.Errorf("error retrieving user role: %v", err)
 	}
 
-	// Generate nonce
 	nonceBytes := make([]byte, 16)
 	if _, err := rand.Read(nonceBytes); err != nil {
 		return "", "", "", fmt.Errorf("error generating nonce: %v", err)
@@ -154,10 +137,6 @@ func InitiatePublicKeyLogin(db store.Store, email string) (string, string, strin
 	return nonce, authData.Username, string(role), nil
 }
 
-// VerifyPublicKeyLogin verifies the signature of the challenge for the given email.
-// It retrieves the encrypted UUID (using hashed email), decrypts it to obtain the user UUID,
-// then uses the hashed userUUID to access the auth public key.
-// If the signature is valid, it generates tokens and saves the refresh token in the DB.
 func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (string, string, string, string, error) {
 	// Lock and fetch the stored nonce for this email
 	nonceMu.Lock()
@@ -174,7 +153,6 @@ func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (st
 	delete(nonceMap, email)
 	nonceMu.Unlock()
 
-	// 1) Retrieve and decrypt the user UUID
 	encryptedUUID, err := db.Get(bucketAuthUUID, store.HashBytes([]byte(email)))
 	if err != nil {
 		return "", "", "", "", errors.New("user not found for public key login")
@@ -184,13 +162,11 @@ func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (st
 		return "", "", "", "", fmt.Errorf("error decrypting user UUID: %v", err)
 	}
 
-	// 2) Check ban status
 	keyUUID := store.HashBytes([]byte(userUUID))
 	if _, err := db.Get("cheese_banned_users", keyUUID); err == nil {
 		return "", "", "", "", errors.New("user is banned")
 	}
 
-	// 3) Load and parse the stored auth‐public‐key
 	encryptedAuthData, err := db.Get("auth_public_keys", keyUUID)
 	if err != nil {
 		return "", "", "", "", errors.New("auth public key not found")
@@ -216,7 +192,6 @@ func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (st
 		return "", "", "", "", errors.New("public key is not RSA")
 	}
 
-	// 4) Verify signature over the nonce
 	sig, err := base64.StdEncoding.DecodeString(signatureB64)
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("error decoding signature: %v", err)
@@ -226,7 +201,6 @@ func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (st
 		return "", "", "", "", errors.New("signature verification failed")
 	}
 
-	// 5) Fetch role and group
 	roleBytes, err := db.Get("cheese_roles", keyUUID)
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("error retrieving user role: %v", err)
@@ -236,7 +210,6 @@ func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (st
 		return "", "", "", "", fmt.Errorf("error retrieving user group: %v", err)
 	}
 
-	// 6) Generate JWT tokens
 	accessToken, err := token.GenerateAccessToken(userUUID)
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("error generating access token: %v", err)
@@ -246,17 +219,14 @@ func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (st
 		return "", "", "", "", fmt.Errorf("error generating refresh token: %v", err)
 	}
 
-	// 7) Persist the hashed refresh token
 	hashedRefresh := store.HashBytes([]byte(refreshToken))
 	if err := db.Put("cheese_refresh", keyUUID, hashedRefresh); err != nil {
 		return "", "", "", "", fmt.Errorf("error saving refresh token: %v", err)
 	}
 
-	// Success: return tokens, role and group
 	return accessToken, refreshToken, string(roleBytes), string(groupBytes), nil
 }
 
-// LoadAuthPrivateKey loads the auth private key from keys/users-auth/<username>/private.pem.
 func LoadAuthPrivateKey(username string) (*rsa.PrivateKey, error) {
 	keyPath := filepath.Join("keys", "users-auth", username, "private.pem")
 	data, err := ioutil.ReadFile(keyPath)

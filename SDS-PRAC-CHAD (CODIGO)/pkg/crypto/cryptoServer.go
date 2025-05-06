@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 )
 
-// serverKey will hold the key for server data encryption.
-// The key is loaded from keys/tomato_server.key and must be 32 bytes long.
 var serverKey []byte
 
 func init() {
@@ -26,8 +24,6 @@ func init() {
 	serverKey = key
 }
 
-// EncryptServer encrypts the plaintext using AES-GCM-256 with the server key.
-// It returns the nonce concatenated with the ciphertext.
 func EncryptServer(plaintext []byte) ([]byte, error) {
 	block, err := aes.NewCipher(serverKey)
 	if err != nil {
@@ -42,12 +38,9 @@ func EncryptServer(plaintext []byte) ([]byte, error) {
 		return nil, err
 	}
 	ciphertext := aesGCM.Seal(nil, nonce, plaintext, nil)
-	// Prepend nonce to ciphertext
 	return append(nonce, ciphertext...), nil
 }
 
-// DecryptServer decrypts the data using AES-GCM-256 with the server key.
-// It expects the input to be nonce concatenated with the ciphertext.
 func DecryptServer(data []byte) ([]byte, error) {
 	block, err := aes.NewCipher(serverKey)
 	if err != nil {

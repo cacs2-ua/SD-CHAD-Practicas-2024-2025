@@ -38,10 +38,9 @@ import (
 
 type ChatMessage struct {
 	Sender string `json:"sender"`
-	Packet string `json:"packet"` // JSON-encoded EncryptedPacket
+	Packet string `json:"packet"`
 }
 
-// Global bucket names defined as plain strings to avoid double hashing.
 var bucketAuthUUID = "cheese_auth_uuid"
 var bucketAuthPassword = "cheese_auth_password"
 var bucketAuthEmail = "cheese_auth_email"
@@ -57,9 +56,7 @@ var (
 	publicKey  ed25519.PublicKey
 )
 
-// init loads the Ed25519 private and public keys from the "keys" folder.
 func init() {
-	// Load private key from keys/private.pem
 	privBytes, err := ioutil.ReadFile("keys/private.pem")
 	if err != nil {
 		log.Fatalf("Error reading private key: %v", err)
@@ -77,10 +74,8 @@ func init() {
 	if !ok {
 		log.Fatal("Private key is not of type Ed25519")
 	}
-	// Set token signing key
 	token.SetPrivateKey(privateKey)
 
-	// Load public key from keys/public.pem
 	pubBytes, err := ioutil.ReadFile("keys/public.pem")
 	if err != nil {
 		log.Fatalf("Error reading public key: %v", err)
@@ -99,7 +94,6 @@ func init() {
 	}
 }
 
-// validateJWTSignature parses the token string and validates its signature using the public key.
 func validateJWTSignature(tokenStr string) (*jwt.Token, error) {
 	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
@@ -116,38 +110,32 @@ func validateJWTSignature(tokenStr string) (*jwt.Token, error) {
 	return token, nil
 }
 
-// hashPasswordSHA3 hashes a password using SHA3-256 and returns a hex-encoded string.
 func hashPasswordSHA3(password string) string {
 	hasher := sha3.New256()
 	hasher.Write([]byte(password))
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-// isValidEmail validates the email format using a regex.
 func isValidEmail(email string) bool {
 	re := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 	return re.MatchString(email)
 }
 
-// serverImpl encapsulates the state of our server.
 type serverImpl struct {
 	db  store.Store
 	log *log.Logger
 }
 
-// Run starts the database and the HTTPS server.
 func Run() error {
 	db, err := store.NewStore("bbolt", "data/server.db")
 	if err != nil {
 		return fmt.Errorf("error opening database: %v", err)
 	}
 
-	// Create default users (admin and moderator) if they do not exist
 	if err := createDefaultUsers(db); err != nil {
 		log.Printf("Error creating default users: %v", err)
 	}
 
-	// Create the messages bucket if it does not exist
 	bs, ok := db.(*store.BboltStore)
 	if !ok {
 		return fmt.Errorf("error asserting store to *BboltStore")
@@ -175,7 +163,6 @@ func Run() error {
 	return err
 }
 
-// apiHandler decodes the JSON request, dispatches the action, and returns the JSON response.
 func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -187,7 +174,6 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract access token from Authorization header.
 	authHeader := r.Header.Get("Authorization")
 	var providedAccessToken string
 	if authHeader != "" {
@@ -197,7 +183,6 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Extract refresh token from X-Refresh-Token header.
 	refreshHeader := r.Header.Get("X-Refresh-Token")
 	var providedRefreshToken string
 	if refreshHeader != "" {
@@ -216,12 +201,10 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 	case api.ActionLogin:
 		res, newAccessToken, newRefreshToken = s.loginUser(req)
 	case api.ActionPublicKeyLogin:
-		// Initiate public key login; req.Email must be provided
 		challenge, username, role, err := functionalities.InitiatePublicKeyLogin(s.db, req.Email)
 		if err != nil {
 			res = api.Response{Success: false, Message: err.Error()}
 		} else {
-			// Return a JSON object with the challenge and username
 			dataObj := map[string]string{
 				"challenge": challenge,
 				"username":  username,
@@ -231,12 +214,11 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 			res = api.Response{Success: true, Message: "Challenge generated", Data: string(dataBytes)}
 		}
 	case api.ActionPublicKeyLoginResponse:
-		// Verify public key login response; req.Email and req.Data (signature) are required
 		accessToken, refreshToken, role, group, err := functionalities.VerifyPublicKeyLogin(s.db, req.Email, req.Data)
 		responseData := map[string]string{
 			"username":   req.Email,
 			"role":       string(role),
-			"user_group": string(group), // NEW
+			"user_group": string(group),
 		}
 		responseJSON, _ := json.Marshal(responseData)
 
@@ -266,14 +248,12 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res = s.backupDatabase()
 	case api.ActionRestore:
 		res = s.restoreDatabase(req)
-	// New messaging actions
 	case api.ActionGetUsernames:
 		res = s.handleGetUsernames(req)
 	case api.ActionSendMessage:
 		res = s.handleSendMessage(req)
 	case api.ActionGetMessages:
 		res = s.handleGetMessages(req)
-	// Poll handlers
 	case api.ActionCreatePoll:
 		res = s.handleCreatePoll(req, providedAccessToken)
 	case api.ActionModifyPoll:
@@ -284,7 +264,6 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 		res = s.handleViewResults(req, providedAccessToken)
 	case api.ActionListPolls:
 		res = s.handleListPolls(req, providedAccessToken)
-	// Admin handlers
 	case api.ActionBanUser:
 		res = s.banUser(req)
 	case api.ActionUnbanUser:
@@ -304,17 +283,15 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
+	if res.Success {
+		// logging.Log(fmt.Sprintf("Acción %s ejecutada con éxito para usuario %s", req.Action, req.Username))
+	} else {
+		// logging.Log(fmt.Sprintf("Acción %s falló para usuario %s: %s", req.Action, req.Username, res.Message))
+	}
+
 	json.NewEncoder(w).Encode(res)
 }
 
-// registerUser creates the following entries:
-// 1. In cheese_auth_uuid: key = hash(email), value = encrypted(UUID)
-// 2. In cheese_auth_email: key = hash(UUID), value = hash(email)
-// 3. In cheese_auth_password: key = hash(UUID), value = hash(password)
-// 4. In cheese_auth_username: key = hash(UUID), value = encrypted(username)
-// 5. In cheese_auth_username_email: key = hash(username), value = hash(email)
-// 6. In cheese_userdata: key = hash(UUID), value = "" (empty)
-// Additionally, it generates an RSA key pair for messaging.
 func (s *serverImpl) registerUser(req api.Request) api.Response {
 	req.Username = strings.TrimSpace(req.Username)
 	req.Password = strings.TrimSpace(req.Password)
@@ -413,7 +390,6 @@ func (s *serverImpl) registerUser(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error retrieving user role"}
 	}
 
-	// Incluir el rol en la respuesta
 	responseData := map[string]string{
 		"username":   req.Username,
 		"role":       string(role),
@@ -453,14 +429,12 @@ func createDefaultUsers(db store.Store) error {
 			continue
 		}
 
-		// Create user following existing registration logic
 		userUUID := uuid.New().String()
 		encryptedUUID, err := crypto.EncryptUUID(userUUID)
 		if err != nil {
 			return fmt.Errorf("error encrypting UUID for %s: %v", user.email, err)
 		}
 
-		// Hash the password using SHA3-256
 		hasher := sha3.New256()
 		hasher.Write([]byte(user.password))
 		hashedPassword := hex.EncodeToString(hasher.Sum(nil))
@@ -473,7 +447,6 @@ func createDefaultUsers(db store.Store) error {
 		keyUUID := store.HashBytes([]byte(userUUID))
 		keyUsername := store.HashBytes([]byte(user.username))
 
-		// Save the cypher for the hashed UUID
 		encryptedCypher, err := crypto.EncryptServer(keyUUID)
 		if err != nil {
 			return fmt.Errorf("error encrypting cypher UUID for %s: %v", user.email, err)
@@ -499,7 +472,6 @@ func createDefaultUsers(db store.Store) error {
 		if err := db.Put("cheese_userdata", keyUUID, []byte("")); err != nil {
 			return fmt.Errorf("error initializing user data for %s: %v", user.email, err)
 		}
-		// Save role for the user in the "cheese_roles" bucket
 		if err := db.Put("cheese_roles", keyUUID, []byte(user.role)); err != nil {
 			return fmt.Errorf("error saving role for %s: %v", user.email, err)
 		}
@@ -508,11 +480,9 @@ func createDefaultUsers(db store.Store) error {
 			return fmt.Errorf("error saving user group for %s: %v", user.email, err)
 		}
 
-		// Generate RSA key pair for messaging (public key encryption)
 		if err := functionalities.GenerateKeyPair(user.username); err != nil {
 			return fmt.Errorf("error generating key pair for default user %s: %v", user.email, err)
 		}
-		// Generate the public key authentication key pair for the user
 		if err := functionalities.GenerateAuthKeyPair(db, user.username, userUUID); err != nil {
 			return fmt.Errorf("error generating auth key pair for default user %s: %v", user.email, err)
 		}
@@ -520,9 +490,6 @@ func createDefaultUsers(db store.Store) error {
 	return nil
 }
 
-// lookupUUIDFromUsername obtains the user's UUID by using the following chain:
-// 1. Look up cheese_auth_username_email with key = hash(username) to obtain hashed email.
-// 2. Look up cheese_auth_uuid with key = hashed email to get encrypted UUID and decrypt it.
 func (s *serverImpl) lookupUUIDFromUsername(username string) (string, error) {
 	keyUsername := store.HashBytes([]byte(username))
 	hashedEmail, err := s.db.Get(bucketAuthUsernameEmail, keyUsername)
@@ -601,11 +568,10 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 
 	userGroupBytes, _ := s.db.Get(bucketUserGroup, keyUUID)
 
-	// Incluir el rol en la respuesta
 	responseData := map[string]string{
 		"username":   username,
 		"role":       string(role),
-		"user_group": string(userGroupBytes), // NEW
+		"user_group": string(userGroupBytes),
 	}
 
 	responseJSON, _ := json.Marshal(responseData)
@@ -615,7 +581,6 @@ func (s *serverImpl) loginUser(req api.Request) (api.Response, string, string) {
 	return api.Response{Success: true, Message: "Login successful", Data: string(responseJSON)}, accessToken, refreshToken
 }
 
-// refreshToken validates the provided refresh token and rotates it.
 func (s *serverImpl) refreshToken(req api.Request, providedRefreshToken string) (api.Response, string, string) {
 	if req.Username == "" || providedRefreshToken == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}, "", ""
@@ -650,12 +615,11 @@ func (s *serverImpl) refreshToken(req api.Request, providedRefreshToken string) 
 		return api.Response{Success: false, Message: "Error updating refresh token"}, "", ""
 	}
 
-	logging.Log("Tokens refreshed for user: " + req.Username)
+	// logging.Log("Tokens refreshed for user: " + req.Username)
 
 	return api.Response{Success: true, Message: "Tokens refreshed successfully"}, newAccessToken, newRefreshToken
 }
 
-// fetchData verifies the access token and returns the content from the "cheese_userdata" bucket.
 func (s *serverImpl) fetchData(req api.Request, providedAccessToken string) api.Response {
 	if req.Username == "" || providedAccessToken == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
@@ -673,6 +637,8 @@ func (s *serverImpl) fetchData(req api.Request, providedAccessToken string) api.
 		return api.Response{Success: false, Message: "Error retrieving user data"}
 	}
 
+	// logging.Log("Data readed/updated for the user: " + req.Username)
+
 	return api.Response{
 		Success: true,
 		Message: "Private data for " + req.Username,
@@ -680,7 +646,6 @@ func (s *serverImpl) fetchData(req api.Request, providedAccessToken string) api.
 	}
 }
 
-// updateData updates the "cheese_userdata" bucket after verifying the access token.
 func (s *serverImpl) updateData(req api.Request, providedAccessToken string) api.Response {
 	if req.Username == "" || providedAccessToken == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
@@ -699,7 +664,6 @@ func (s *serverImpl) updateData(req api.Request, providedAccessToken string) api
 	return api.Response{Success: true, Message: "User data updated"}
 }
 
-// logoutUser deletes the refresh token, invalidating the session.
 func (s *serverImpl) logoutUser(req api.Request, providedRefreshToken string) api.Response {
 	if req.Username == "" || providedRefreshToken == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
@@ -719,7 +683,6 @@ func (s *serverImpl) logoutUser(req api.Request, providedRefreshToken string) ap
 
 }
 
-// isAccessTokenValid verifies the token signature and expiration using the user UUID.
 func (s *serverImpl) isAccessTokenValid(userUUID, tokenString string) bool {
 	token, err := validateJWTSignature(tokenString)
 	if err != nil {
@@ -735,7 +698,6 @@ func (s *serverImpl) isAccessTokenValid(userUUID, tokenString string) bool {
 	return true
 }
 
-// backupDatabase calls the backup package to perform a backup.
 func (s *serverImpl) backupDatabase() api.Response {
 	if err := backup.BackupDatabase(); err != nil {
 		return api.Response{Success: false, Message: fmt.Sprintf("Error creating backup: %v", err)}
@@ -743,7 +705,6 @@ func (s *serverImpl) backupDatabase() api.Response {
 	return api.Response{Success: true, Message: "Backup created successfully"}
 }
 
-// DownloadBackupFromGoogleDrive downloads a backup file from Google Drive.
 func DownloadBackupFromGoogleDrive(fileID string, destinationPath string, credentialsPath string) error {
 	ctx := context.Background()
 	srv, err := drive.NewService(ctx, option.WithCredentialsFile(credentialsPath))
@@ -766,7 +727,6 @@ func DownloadBackupFromGoogleDrive(fileID string, destinationPath string, creden
 	return nil
 }
 
-// restoreDatabase downloads a backup, replaces the current database file, and reopens the store.
 func (s *serverImpl) restoreDatabase(req api.Request) api.Response {
 	if req.Data == "" {
 		return api.Response{Success: false, Message: "Missing backup file ID"}
@@ -799,12 +759,6 @@ func (s *serverImpl) restoreDatabase(req api.Request) api.Response {
 	}
 }
 
-// ---------------------------
-// New Messaging Actions
-// ---------------------------
-
-// handleGetUsernames retrieves all usernames from the "cheese_auth_username" bucket.
-// It decrypts each stored username using crypto.DecryptUsername.
 func (s *serverImpl) handleGetUsernames(req api.Request) api.Response {
 	bucketName := bucketAuthUsername
 	var usernames []string
@@ -819,16 +773,12 @@ func (s *serverImpl) handleGetUsernames(req api.Request) api.Response {
 			return fmt.Errorf("bucket not found")
 		}
 		return b.ForEach(func(k, v []byte) error {
-			// First decrypt with DecryptServer (to remove the outer encryption)
 			serverDecrypted, err := crypto.DecryptServer(v)
 			if err != nil {
-				// Skip entries that cannot be decrypted by server key
 				return nil
 			}
-			// Now decrypt with DecryptUsername to get the actual username
 			decrypted, err := crypto.DecryptUsername(string(serverDecrypted))
 			if err != nil {
-				// Skip entries that cannot be decrypted
 				return nil
 			}
 			usernames = append(usernames, decrypted)
@@ -845,8 +795,6 @@ func (s *serverImpl) handleGetUsernames(req api.Request) api.Response {
 	return api.Response{Success: true, Message: "Usernames retrieved", Data: string(data)}
 }
 
-// handleSendMessage stores an encrypted message in the "messages" bucket.
-// It expects req.Sender (the sender's username), req.Username (the recipient), and req.Data (the encrypted packet as JSON).
 func (s *serverImpl) handleSendMessage(req api.Request) api.Response {
 	sender := req.Sender
 	recipient := req.Username
@@ -854,7 +802,6 @@ func (s *serverImpl) handleSendMessage(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Missing sender, recipient, or data"}
 	}
 
-	// Get the encrypted hashed UUID for sender and recipient using the new utility function.
 	encryptedUUIDSender, err := utils.GetEncryptedHashedUUIDFromUsername(s.db, sender)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for sender: " + err.Error()}
@@ -864,8 +811,6 @@ func (s *serverImpl) handleSendMessage(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for recipient: " + err.Error()}
 	}
 
-	// Now the concatenation of the encrypted UUIDs are used as the bucket key.
-	// Here is created the bucket key: conversation ID by lexicographically sorting the two encrypted UUIDs.
 	var convID string
 	if encryptedUUIDSender < encryptedUUIDRecipient {
 		convID = fmt.Sprintf("%s:%s", encryptedUUIDSender, encryptedUUIDRecipient)
@@ -873,11 +818,9 @@ func (s *serverImpl) handleSendMessage(req api.Request) api.Response {
 		convID = fmt.Sprintf("%s:%s", encryptedUUIDRecipient, encryptedUUIDSender)
 	}
 
-	// Append the current timestamp.
 	timestamp := time.Now().UnixNano()
 	messageKey := fmt.Sprintf("%s:%d", convID, timestamp)
 
-	// Wrap the incoming packet (req.Data) with the sender identity.
 	chatMsg := ChatMessage{
 		Sender: sender,
 		Packet: req.Data,
@@ -887,15 +830,15 @@ func (s *serverImpl) handleSendMessage(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error encoding chat message: " + err.Error()}
 	}
 
-	// Store the message using the new conversation key.
 	if err := s.db.Put(bucketMessages, []byte(messageKey), chatMsgBytes); err != nil {
 		return api.Response{Success: false, Message: "Error storing message: " + err.Error()}
 	}
 
+	// logging.Log(fmt.Sprintf("Mensaje enviado de %s a %s", req.Sender, req.Username))
+
 	return api.Response{Success: true, Message: "Message stored"}
 }
 
-// handleGetMessages retrieves all messages for a conversation between req.Sender and req.Username.
 func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 	sender := req.Sender
 	partner := req.Username
@@ -903,7 +846,6 @@ func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Missing sender or conversation partner"}
 	}
 
-	// Get the encrypted hashed UUID for both the sender and the partner.
 	encryptedUUIDSender, err := utils.GetEncryptedHashedUUIDFromUsername(s.db, sender)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for sender: " + err.Error()}
@@ -913,7 +855,6 @@ func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error retrieving encrypted UUID for partner: " + err.Error()}
 	}
 
-	// Create the conversation ID by lexicographically sorting the encrypted UUIDs.
 	var convID string
 	if encryptedUUIDSender < encryptedUUIDPartner {
 		convID = fmt.Sprintf("%s:%s", encryptedUUIDSender, encryptedUUIDPartner)
@@ -921,7 +862,6 @@ func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 		convID = fmt.Sprintf("%s:%s", encryptedUUIDPartner, encryptedUUIDSender)
 	}
 
-	// Use convID as a prefix to retrieve all messages for the conversation.
 	prefix := []byte(convID + ":")
 	var chatMessages []ChatMessage
 	bs, ok := s.db.(*store.BboltStore)
@@ -937,10 +877,9 @@ func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 		c := b.Cursor()
 		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
 			var chatMsg ChatMessage
-			// The stored value is encrypted with EncryptServer; decrypt it first.
 			decryptedVal, err := crypto.DecryptServer(v)
 			if err != nil {
-				continue // Skip if decryption fails.
+				continue
 			}
 			if err := json.Unmarshal(decryptedVal, &chatMsg); err != nil {
 				continue
@@ -957,42 +896,40 @@ func (s *serverImpl) handleGetMessages(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error encoding messages"}
 	}
 
+	// logging.Log(fmt.Sprintf("Mensajes recuperados para conversación %s↔%s", req.Sender, req.Username))
+
 	return api.Response{Success: true, Message: "Messages retrieved", Data: string(data)}
 }
 
-// Ban a user by adding their UUID to the banned users bucket.
 func (s *serverImpl) banUser(req api.Request) api.Response {
 	if req.Username == "" {
 		return api.Response{Success: false, Message: "Missing username"}
 	}
 
-	// Lookup the user's UUID
 	userUUID, err := s.lookupUUIDFromUsername(req.Username)
 	if err != nil {
 		return api.Response{Success: false, Message: "User not found"}
 	}
 
-	// Check the user's role
 	keyUUID := store.HashBytes([]byte(userUUID))
 	role, err := s.db.Get("cheese_roles", keyUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error retrieving user role"}
 	}
 
-	// Prevent banning admins or moderators
 	if string(role) == "admin" || string(role) == "moderator" {
 		return api.Response{Success: false, Message: "Cannot ban users with admin or moderator roles"}
 	}
 
-	// Proceed with banning the user
 	if err := s.db.Put(bucketBannedUsers, keyUUID, []byte("banned")); err != nil {
 		return api.Response{Success: false, Message: "Error banning user: " + err.Error()}
 	}
 
+	logging.Log(fmt.Sprintf("User banned: %s", req.Username))
+
 	return api.Response{Success: true, Message: "User banned successfully"}
 }
 
-// Unban a user by removing their UUID from the banned users bucket.
 func (s *serverImpl) unbanUser(req api.Request) api.Response {
 	if req.Username == "" {
 		return api.Response{Success: false, Message: "Missing username"}
@@ -1005,17 +942,18 @@ func (s *serverImpl) unbanUser(req api.Request) api.Response {
 	if err := s.db.Delete(bucketBannedUsers, keyUUID); err != nil {
 		return api.Response{Success: false, Message: "Error unbanning user: " + err.Error()}
 	}
+
+	logging.Log(fmt.Sprintf("User unbanned: %s", req.Username))
+
 	return api.Response{Success: true, Message: "User unbanned successfully"}
 }
 
-// Check if a user is banned.
 func (s *serverImpl) isUserBanned(userUUID string) bool {
 	keyUUID := store.HashBytes([]byte(userUUID))
 	_, err := s.db.Get(bucketBannedUsers, keyUUID)
-	return err == nil // If found, the user is banned.
+	return err == nil
 }
 
-// Check if a user is banned by looking up their UUID in the banned users bucket.
 func (s *serverImpl) checkUserBanStatus(req api.Request) api.Response {
 	if req.Username == "" {
 		return api.Response{Success: false, Message: "Missing username"}
@@ -1037,13 +975,11 @@ func (s *serverImpl) handleFetchUserRole(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Missing username"}
 	}
 
-	// Retrieve the user's UUID
 	userUUID, err := s.lookupUUIDFromUsername(req.Username)
 	if err != nil {
 		return api.Response{Success: false, Message: "User not found"}
 	}
 
-	// Retrieve the current role of the user
 	keyUUID := store.HashBytes([]byte(userUUID))
 	currentRole, err := s.db.Get("cheese_roles", keyUUID)
 	if err != nil {
@@ -1058,39 +994,35 @@ func (s *serverImpl) handleModifyUserRole(req api.Request, providedAccessToken s
 		return api.Response{Success: false, Message: "Missing username or role"}
 	}
 
-	// Verify that the provided role is valid
 	newRole := req.Data
 	if newRole != "normal" && newRole != "moderator" {
 		return api.Response{Success: false, Message: "Invalid role"}
 	}
 
-	// Retrieve the user's UUID
 	userUUID, err := s.lookupUUIDFromUsername(req.Username)
 	if err != nil {
 		return api.Response{Success: false, Message: "User not found"}
 	}
 
-	// Retrieve the current role of the user
 	keyUUID := store.HashBytes([]byte(userUUID))
 	currentRole, err := s.db.Get("cheese_roles", keyUUID)
 	if err != nil {
 		return api.Response{Success: false, Message: "Error retrieving user role"}
 	}
 
-	// Check if the user is an admin
 	if string(currentRole) == "admin" {
 		return api.Response{Success: false, Message: "Cannot modify the role of an admin"}
 	}
 
-	// Check if the new role is the same as the current role
 	if string(currentRole) == newRole {
 		return api.Response{Success: false, Message: fmt.Sprintf("The user already has the role '%s'", newRole)}
 	}
 
-	// Update the role in the database
 	if err := s.db.Put("cheese_roles", keyUUID, []byte(newRole)); err != nil {
 		return api.Response{Success: false, Message: "Error updating user role"}
 	}
+
+	logging.Log(fmt.Sprintf("User role modified: %s -> %s", req.Username, newRole))
 
 	return api.Response{Success: true, Message: "User role updated successfully"}
 }

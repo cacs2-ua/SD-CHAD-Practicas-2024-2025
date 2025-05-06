@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-// Poll representa una encuesta en el sistema
 type Poll struct {
 	ID         string         `json:"id"`
 	Title      string         `json:"title"`
@@ -23,18 +22,15 @@ type Poll struct {
 	UserGroup  string         `json:"user_group,omitempty"`
 }
 
-// UserVote registra que un usuario ha votado en una encuesta específica
 type UserVote struct {
 	UserID string `json:"userId"`
 	PollID string `json:"pollId"`
 }
 
-// createPoll permite al usuario crear una nueva encuesta
 func (c *client) createPoll() {
 	ui.ClearScreen()
 	fmt.Println("** Crear Nueva Encuesta **")
 
-	// Solicitar título de la encuesta
 	title := ui.ReadInput("Título de la encuesta")
 	if title == "" {
 		fmt.Println("El título no puede estar vacío.")
@@ -43,7 +39,6 @@ func (c *client) createPoll() {
 
 	userGroup := ui.ReadInput("Asigna un grupo de usuarios (opcional)")
 
-	// Solicitar opciones de voto
 	var options []string
 	fmt.Println("Introduce las opciones de voto (deja en blanco para terminar):")
 	for i := 1; ; i++ {
@@ -58,7 +53,6 @@ func (c *client) createPoll() {
 		options = append(options, option)
 	}
 
-	// Tipo de voto
 	voteType := ui.ReadInput("¿Encuesta de voto múltiple? (s/n):")
 	if voteType != "s" && voteType != "n" {
 		fmt.Println("Opción no válida")
@@ -73,7 +67,6 @@ func (c *client) createPoll() {
 		singleVote = true
 	}
 
-	// Solicitar hashtags
 	var tags []string
 	fmt.Println("Introduce hasta 3 hashtags (deja en blanco para terminar):")
 	for len(tags) < 3 {
@@ -82,25 +75,22 @@ func (c *client) createPoll() {
 			break
 		}
 		if !strings.HasPrefix(tag, "#") {
-			tag = "#" + tag // Asegurarse de que comience con #
+			tag = "#" + tag
 		}
 		tags = append(tags, tag)
 	}
 
-	// Solicitar fecha de finalización
 	fmt.Println("Introduce la fecha de finalización (formato: DD/MM/YYYY):")
 	dateStr := ui.ReadInput("Fecha")
 	fmt.Println("Introduce la hora de finalización (formato: HH:MM):")
 	timeStr := ui.ReadInput("Hora")
 
-	// Parsear fecha y hora
 	endDate, err := time.Parse("02/01/2006 15:04", dateStr+" "+timeStr)
 	if err != nil {
 		fmt.Println("Formato de fecha u hora inválido:", err)
 		return
 	}
 
-	// Crear la estructura de la encuesta
 	poll := Poll{
 		Title:      title,
 		Options:    options,
@@ -111,14 +101,12 @@ func (c *client) createPoll() {
 		UserGroup:  strings.TrimSpace(userGroup),
 	}
 
-	// Serializar la encuesta
 	pollData, err := json.Marshal(poll)
 	if err != nil {
 		fmt.Println("Error al serializar la encuesta:", err)
 		return
 	}
 
-	// Enviar la solicitud al servidor
 	res, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionCreatePoll,
 		Username: c.currentUser,
@@ -127,16 +115,12 @@ func (c *client) createPoll() {
 
 	fmt.Println("Éxito:", res.Success)
 	fmt.Println("Mensaje:", res.Message)
-	/*if res.Success {
-		fmt.Println("ID de la encuesta:", res.Data)
-	}*/
 }
 
 func (c *client) modifyPoll() {
 	ui.ClearScreen()
 	fmt.Println("** Modify Poll **")
 
-	// Request the list of polls from the server
 	res, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionListPolls,
 		Username: c.currentUser,
@@ -158,7 +142,6 @@ func (c *client) modifyPoll() {
 		return
 	}
 
-	// Display the list of polls
 	fmt.Println("Available polls to modify:")
 	for i, poll := range polls {
 		fmt.Printf("%d. %s (ends on %s)\n", i+1, poll.Title, poll.EndDate.Format("02/01/2006 15:04"))
@@ -170,7 +153,6 @@ func (c *client) modifyPoll() {
 		}
 	}
 
-	// Ask the user to select a poll
 	choice := ui.ReadInt("Select a poll to modify")
 	if choice < 1 || choice > len(polls) {
 		fmt.Println("Invalid choice.")
@@ -179,7 +161,6 @@ func (c *client) modifyPoll() {
 
 	selectedPoll := polls[choice-1]
 
-	// Show current data
 	fmt.Printf("Current title: %s\n", selectedPoll.Title)
 	fmt.Printf("Current options: %s\n", strings.Join(selectedPoll.Options, ", "))
 	fmt.Printf("Current end date: %s\n", selectedPoll.EndDate.Format("02/01/2006 15:04"))
@@ -187,7 +168,6 @@ func (c *client) modifyPoll() {
 		fmt.Printf("Current user group: %s\n", selectedPoll.UserGroup)
 	}
 
-	// Ask for new data
 	newTitle := ui.ReadInput("New title (leave blank to keep):")
 
 	newUserGroup := ui.ReadInput("New user group (leave blank to keep):")
@@ -202,7 +182,6 @@ func (c *client) modifyPoll() {
 		newOptions = append(newOptions, option)
 	}
 
-	// Tipo de voto
 	voteType := ui.ReadInput("Multiple vote? (y/n):")
 	if voteType != "y" && voteType != "n" {
 		fmt.Println("Opción no válida")
@@ -217,7 +196,6 @@ func (c *client) modifyPoll() {
 		singleVote = true
 	}
 
-	// Validate that there are at least 2 options
 	if len(newOptions) > 0 && len(newOptions) < 2 {
 		fmt.Println("You must provide at least 2 options.")
 		return
@@ -225,7 +203,6 @@ func (c *client) modifyPoll() {
 
 	newDateStr := ui.ReadInput("New end date (leave blank to keep):")
 
-	// Parse the new end date if provided
 	var newEndDate time.Time
 	var err error
 	if newDateStr != "" {
@@ -236,7 +213,6 @@ func (c *client) modifyPoll() {
 		}
 	}
 
-	// Create the updated poll structure
 	updatedPoll := Poll{
 		ID:         selectedPoll.ID,
 		SingleVote: singleVote,
@@ -255,14 +231,12 @@ func (c *client) modifyPoll() {
 		updatedPoll.UserGroup = strings.TrimSpace(newUserGroup)
 	}
 
-	// Serialize the updated poll
 	updatedPollData, err := json.Marshal(updatedPoll)
 	if err != nil {
 		fmt.Println("Error serializing updated poll:", err)
 		return
 	}
 
-	// Send the request to the server
 	resUpdate, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionModifyPoll,
 		Username: c.currentUser,
@@ -273,12 +247,10 @@ func (c *client) modifyPoll() {
 	fmt.Println("Message:", resUpdate.Message)
 }
 
-// voteInPoll permite al usuario votar en una encuesta existente
 func (c *client) voteInPoll() {
 	ui.ClearScreen()
 	fmt.Println("** Votar en una Encuesta **")
 
-	// Obtener la lista de encuestas
 	res, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionListPolls,
 		Username: c.currentUser,
@@ -289,7 +261,6 @@ func (c *client) voteInPoll() {
 		return
 	}
 
-	// Limpiar posibles caracteres problemáticos en el JSON
 	cleanData := strings.ReplaceAll(res.Data, "\u00a0", " ")
 
 	var polls []Poll
@@ -304,7 +275,6 @@ func (c *client) voteInPoll() {
 		return
 	}
 
-	// Filtrar encuestas activas
 	var activePolls []Poll
 	for _, poll := range polls {
 		if !poll.EndDate.Before(time.Now()) {
@@ -317,7 +287,6 @@ func (c *client) voteInPoll() {
 		return
 	}
 
-	// Mostrar las encuestas disponibles
 	fmt.Println("Encuestas disponibles:")
 	for i, poll := range activePolls {
 		fmt.Printf("%d. %s (finaliza el %s)\n", i+1, poll.Title, poll.EndDate.Format("02/01/2006 15:04"))
@@ -330,7 +299,6 @@ func (c *client) voteInPoll() {
 		}
 	}
 
-	// Solicitar la elección del usuario
 	choice := ui.ReadInt("Selecciona una encuesta")
 	if choice < 1 || choice > len(activePolls) {
 		fmt.Println("Elección inválida.")
@@ -340,7 +308,6 @@ func (c *client) voteInPoll() {
 	selectedPoll := activePolls[choice-1]
 	fmt.Printf("Encuesta seleccionada: %s\n", selectedPoll.Title)
 
-	// Mostrar las opciones de voto
 	fmt.Println("Opciones de voto:")
 	for i, option := range selectedPoll.Options {
 		fmt.Printf("%d. %s\n", i+1, option)
@@ -350,9 +317,7 @@ func (c *client) voteInPoll() {
 	var selectedOptions []string
 	selectedOption := ""
 
-	// Si la encuesta es de voto único
 	if selectedPoll.SingleVote {
-		// Solicitar la opción de voto
 		optionChoice := ui.ReadInt("Selecciona una opción")
 		if optionChoice < 0 || optionChoice > len(selectedPoll.Options) {
 			fmt.Println("Elección inválida.")
@@ -363,7 +328,6 @@ func (c *client) voteInPoll() {
 			selectedOption = selectedPoll.Options[optionChoice-1]
 		}
 	} else {
-		// Si la encuesta permite voto múltiple
 		input := ui.ReadInput("Selecciona las opciones que deseas votar (separadas por comas)")
 
 		if input == "" {
@@ -372,7 +336,7 @@ func (c *client) voteInPoll() {
 		}
 
 		selections := strings.Split(input, ",")
-		selectionMap := make(map[int]bool) // Para evitar votos duplicados
+		selectionMap := make(map[int]bool)
 
 		for _, sel := range selections {
 			sel = strings.TrimSpace(sel)
@@ -386,7 +350,7 @@ func (c *client) voteInPoll() {
 			}
 
 			if num == 0 {
-				continue // voto en blanco
+				continue
 			}
 
 			if !selectionMap[num] {
@@ -396,13 +360,11 @@ func (c *client) voteInPoll() {
 		}
 	}
 
-	// Mostrar las opciones seleccionadas
 	fmt.Println("Opciones seleccionadas:")
 	for _, opt := range selectedOptions {
 		fmt.Println("-", opt)
 	}
 
-	// Crear la estructura del voto
 	voteData := struct {
 		PollID    string   `json:"pollId"`
 		Option    string   `json:"option"`
@@ -415,14 +377,12 @@ func (c *client) voteInPoll() {
 		CreatedBy: selectedPoll.CreatedBy,
 	}
 
-	// Serializar el voto
 	voteJSON, err := json.Marshal(voteData)
 	if err != nil {
 		fmt.Println("Error al serializar el voto:", err)
 		return
 	}
 
-	// Enviar la solicitud al servidor
 	voteRes, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionVoteInPoll,
 		Username: c.currentUser,
@@ -433,17 +393,10 @@ func (c *client) voteInPoll() {
 	fmt.Println("Mensaje:", voteRes.Message)
 }
 
-// viewResults permite al usuario ver los resultados de una encuesta
 func (c *client) viewResults() {
 	ui.ClearScreen()
 	fmt.Println("** Ver Resultados de Encuestas **")
 
-	/*if c.currentUser == "" || c.authToken == "" {
-		fmt.Println("No has iniciado sesión. Por favor, inicia sesión primero.")
-		return
-	}*/
-
-	// Obtener la lista de encuestas
 	res, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionListPolls,
 		Username: c.currentUser,
@@ -454,7 +407,6 @@ func (c *client) viewResults() {
 		return
 	}
 
-	// Limpiar posibles caracteres problemáticos en el JSON
 	cleanData := strings.ReplaceAll(res.Data, "\u00a0", " ")
 
 	var polls []Poll
@@ -469,13 +421,11 @@ func (c *client) viewResults() {
 		return
 	}
 
-	// Mostrar las encuestas disponibles
 	fmt.Println("Encuestas disponibles:")
 	for i, poll := range polls {
 		status := "Activa"
 		if poll.EndDate.Before(time.Now()) {
 			status = "Finalizada"
-			//fmt.Printf("%d. %s\n", i+1, poll.Title)
 		}
 		fmt.Printf("%d. %s (%s)\n", i+1, poll.Title, status)
 
@@ -488,22 +438,14 @@ func (c *client) viewResults() {
 		}
 	}
 
-	// Solicitar la elección del usuario
 	choice := ui.ReadInt("Selecciona una encuesta")
 	if choice < 1 || choice > len(polls) {
 		fmt.Println("Elección inválida.")
 		return
 	}
 
-	// No se puede ver los resultados de una encuesta no finalizada
-	/*if !polls[choice-1].EndDate.Before(time.Now()) {
-		fmt.Println("Elección inválida.")
-		return
-	}*/
-
 	selectedPoll := polls[choice-1]
 
-	// Obtener los resultados detallados
 	resultsRes, _, _ := c.sendRequest(api.Request{
 		Action:   api.ActionViewResults,
 		Username: c.currentUser,
@@ -515,7 +457,6 @@ func (c *client) viewResults() {
 		return
 	}
 
-	// Limpiar posibles caracteres problemáticos en el JSON
 	cleanResultsData := strings.ReplaceAll(resultsRes.Data, "\u00a0", " ")
 
 	var pollResults Poll
@@ -525,7 +466,6 @@ func (c *client) viewResults() {
 		return
 	}
 
-	// Mostrar los resultados
 	ui.ClearScreen()
 	fmt.Printf("** Resultados de la Encuesta: %s **\n\n", pollResults.Title)
 	fmt.Printf("Creada por: %s\n", pollResults.CreatedBy)
@@ -541,7 +481,6 @@ func (c *client) viewResults() {
 	fmt.Printf("Estado: %s\n", status)
 	fmt.Printf("Fecha de finalización: %s\n\n", pollResults.EndDate.Format("02/01/2006 15:04"))
 
-	// Calcular el total de votos
 	totalVotes := 0
 	for _, count := range pollResults.Votes {
 		totalVotes += count
@@ -550,7 +489,6 @@ func (c *client) viewResults() {
 	fmt.Printf("Total de votos: %d\n\n", totalVotes)
 	fmt.Println("Resultados:")
 
-	// Mostrar los resultados de cada opción
 	for _, option := range pollResults.Options {
 		votes := pollResults.Votes[option]
 		percentage := 0.0
