@@ -981,13 +981,11 @@ func (c *client) viewLogs() {
 	ui.ClearScreen()
 	fmt.Println("** Ver Logs **")
 
-	credentialsPath := "keys/credentials.json"           // Ruta al archivo JSON con las credenciales.
-	driveFolderID := "1pWjcrK292tRPFWqC7BYtovgRBitmHaGf" // ID de la carpeta de Google Drive.
+	credentialsPath := "keys/credentials.json"
+	driveFolderID := "1pWjcrK292tRPFWqC7BYtovgRBitmHaGf"
 
-	// Listar los logs disponibles en Google Drive.
 	files, err := listBackupsFromGoogleDrive(driveFolderID, credentialsPath)
 
-	// Filtrar solo los archivos con extensión .enc
 	filteredFiles := make(map[string]string)
 	for name, id := range files {
 		if strings.HasSuffix(name, ".enc") {
