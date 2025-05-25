@@ -50,8 +50,8 @@ func Log(message string) {
 		return
 	}
 
-	today := time.Now().Format("20060102")
-	logFileName := fmt.Sprintf("log_%s.txt", today)
+	epoch := time.Now().Unix()
+	logFileName := fmt.Sprintf("log_%d.txt", epoch)
 	logFilePath := filepath.Join(logDir, logFileName)
 
 	file, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)

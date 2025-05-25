@@ -29,8 +29,8 @@ func BackupDatabase() error {
 		return fmt.Errorf("error creating backup directory: %v", err)
 	}
 
-	timestamp := time.Now().Format("20060102_150405")
-	backupFile := filepath.Join(backupDir, fmt.Sprintf("server_backup_%s.db", timestamp))
+	epoch := time.Now().Unix()
+	backupFile := filepath.Join(backupDir, fmt.Sprintf("server_backup_%d.db", epoch))
 
 	srcFile, err := os.Open(dbPath)
 	if err != nil {
@@ -66,7 +66,7 @@ func BackupDatabase() error {
 			if i == 5 {
 				return fmt.Errorf("error deleting encrypted backup file after retries: %v", err)
 			}
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 		} else {
 			break
 		}
@@ -78,7 +78,7 @@ func BackupDatabase() error {
 			if i == 5 {
 				return fmt.Errorf("error deleting plain backup file after retries: %v", err)
 			}
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 		} else {
 			break
 		}
