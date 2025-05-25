@@ -59,7 +59,6 @@ func Log(message string) {
 		fmt.Printf("Error opening log file: %v\n", err)
 		return
 	}
-	defer file.Close()
 
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	logEntry := fmt.Sprintf("[%s] %s\n", timestamp, message)
@@ -85,10 +84,14 @@ func Log(message string) {
 			if i == 5 {
 				fmt.Printf("Error deleting encrypted log file after retries: %v\n", err)
 			}
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 		} else {
 			break
 		}
+	}
+
+	if err := file.Close(); err != nil {
+		fmt.Printf("Error closing log file before deletion: %v\n", err)
 	}
 
 	// Intentar borrar el .txt hasta 6 veces si está bloqueado
@@ -97,7 +100,7 @@ func Log(message string) {
 			if i == 5 {
 				fmt.Printf("Error deleting plain log file after retries: %v\n", err)
 			}
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 		} else {
 			break
 		}

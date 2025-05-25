@@ -42,10 +42,13 @@ func BackupDatabase() error {
 	if err != nil {
 		return fmt.Errorf("error creating backup file: %v", err)
 	}
-	defer destFile.Close()
 
 	if _, err := io.Copy(destFile, srcFile); err != nil {
 		return fmt.Errorf("error copying database file: %v", err)
+	}
+
+	if err := destFile.Close(); err != nil {
+		return fmt.Errorf("error closing backup file before encryption: %v", err)
 	}
 
 	encryptedBackupFile := backupFile + ".enc"
