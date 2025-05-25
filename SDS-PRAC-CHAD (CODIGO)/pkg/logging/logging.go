@@ -20,7 +20,7 @@ import (
 const (
 	logDir            = "logs"
 	credentialsPath   = "keys/credentials.json"
-	driveFolderID     = "1ka0Ec2EnHcF2qrvk9nsaSpI124jkLMwj"
+	driveFolderID     = "1pWjcrK292tRPFWqC7BYtovgRBitmHaGf"
 	encryptionKeyPath = "keys/logs_encryption.key"
 )
 

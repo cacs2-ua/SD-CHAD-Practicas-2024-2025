@@ -269,6 +269,12 @@ func (c *client) registerUser() {
 
 	rawUserGroup := ui.ReadInput("User group")
 	userGroup := strings.TrimSpace(rawUserGroup)
+
+	if userGroup == "admin" || userGroup == "moderator" {
+		fmt.Println("User group cannot be 'admin' or 'moderator'")
+		return
+	}
+
 	if userGroup == "" {
 		fmt.Println("User group cannot be empty")
 		return
@@ -767,7 +773,7 @@ func (c *client) restoreBackupFromDrive() {
 	fmt.Println("** Restore Backup from Google Drive **")
 
 	credentialsPath := "keys/credentials.json"
-	driveFolderID := "11gN_pH9h0RJkyQ19mZEtJLxVbEyH6ZFt"
+	driveFolderID := "1Ewup_f2O0VgiLXEIIGkQFDTZVHSDgjiE"
 
 	files, err := listBackupsFromGoogleDrive(driveFolderID, credentialsPath)
 	if err != nil {
@@ -976,7 +982,7 @@ func (c *client) viewLogs() {
 	fmt.Println("** Ver Logs **")
 
 	credentialsPath := "keys/credentials.json"           // Ruta al archivo JSON con las credenciales.
-	driveFolderID := "1ka0Ec2EnHcF2qrvk9nsaSpI124jkLMwj" // ID de la carpeta de Google Drive.
+	driveFolderID := "1pWjcrK292tRPFWqC7BYtovgRBitmHaGf" // ID de la carpeta de Google Drive.
 
 	// Listar los logs disponibles en Google Drive.
 	files, err := listBackupsFromGoogleDrive(driveFolderID, credentialsPath)

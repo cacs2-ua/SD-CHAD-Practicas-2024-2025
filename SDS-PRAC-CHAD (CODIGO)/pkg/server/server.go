@@ -290,11 +290,16 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *serverImpl) registerUser(req api.Request) api.Response {
 	req.Username = strings.TrimSpace(req.Username)
+	req.Email = strings.TrimSpace(req.Email)
 	req.Password = strings.TrimSpace(req.Password)
 	req.UserGroup = strings.TrimSpace(req.UserGroup)
 
 	if req.Username == "" || req.Password == "" || req.Email == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
+	}
+
+	if req.UserGroup == "admin" || req.UserGroup == "moderator" {
+		return api.Response{Success: false, Message: "User group cannot be 'admin' nor 'moderator'"}
 	}
 
 	if req.UserGroup == "" {

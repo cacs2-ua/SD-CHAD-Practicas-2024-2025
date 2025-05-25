@@ -20,7 +20,7 @@ import (
 )
 
 const credentialsPath = "keys/credentials.json"
-const driveFolderID = "11gN_pH9h0RJkyQ19mZEtJLxVbEyH6ZFt"
+const driveFolderID = "1Ewup_f2O0VgiLXEIIGkQFDTZVHSDgjiE"
 const backupDir = "backups"
 const dbPath = "data/server.db"
 
@@ -117,6 +117,11 @@ func uploadToGoogleDrive(filePath string, folderID string, credentialsPath strin
 }
 
 func DownloadBackupFromGoogleDrive(fileID string, destinationPath string) error {
+	backupDir := filepath.Dir(destinationPath)
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		return fmt.Errorf("error creating backup dir %q: %v", backupDir, err)
+	}
+
 	ctx := context.Background()
 
 	srv, err := drive.NewService(ctx, option.WithCredentialsFile(credentialsPath))
@@ -125,6 +130,9 @@ func DownloadBackupFromGoogleDrive(fileID string, destinationPath string) error 
 	}
 
 	encryptedFilePath := destinationPath + ".enc"
+
+	defer func() { _ = os.Remove(encryptedFilePath) }()
+
 	resp, err := srv.Files.Get(fileID).Download()
 	if err != nil {
 		return fmt.Errorf("error downloading file from Google Drive: %v", err)
@@ -143,18 +151,6 @@ func DownloadBackupFromGoogleDrive(fileID string, destinationPath string) error 
 
 	if err := decryptFile(encryptedFilePath, destinationPath, "keys/db_encryption.key"); err != nil {
 		return fmt.Errorf("error decrypting file: %v", err)
-	}
-
-	// Se hacen 6 intentos, ya que el borrado puede fallar al
-	// realizarse simultáneamente con el restore del backup
-	for i := 0; i < 6; i++ {
-		if err := os.Remove(encryptedFilePath); err == nil {
-			logging.Log("Encrypted backup file deleted")
-			break
-		} else if i == 5 {
-			logging.Log(fmt.Sprintf("Error deleting encrypted backup file after retries: %v", err))
-		}
-		time.Sleep(500 * time.Millisecond)
 	}
 
 	return nil
