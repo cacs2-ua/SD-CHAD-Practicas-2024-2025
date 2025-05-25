@@ -57,8 +57,28 @@ func BackupDatabase() error {
 		return fmt.Errorf("error uploading encrypted backup to Google Drive: %v", err)
 	}
 
-	if err := os.Remove(encryptedBackupFile); err != nil {
-		return fmt.Errorf("error deleting encrypted backup file: %v", err)
+	// Intentar borrar el .enc hasta 6 veces si está bloqueado
+	for i := 0; i < 6; i++ {
+		if err := os.Remove(encryptedBackupFile); err != nil {
+			if i == 5 {
+				return fmt.Errorf("error deleting encrypted backup file after retries: %v", err)
+			}
+			time.Sleep(100 * time.Millisecond)
+		} else {
+			break
+		}
+	}
+
+	// Intentar borrar el .txt hasta 6 veces si está bloqueado
+	for i := 0; i < 6; i++ {
+		if err := os.Remove(backupFile); err != nil {
+			if i == 5 {
+				return fmt.Errorf("error deleting plain backup file after retries: %v", err)
+			}
+			time.Sleep(100 * time.Millisecond)
+		} else {
+			break
+		}
 	}
 
 	logging.Log("Backup de base de datos creado")
@@ -122,13 +142,14 @@ func DownloadBackupFromGoogleDrive(fileID string, destinationPath string) error 
 		return fmt.Errorf("error decrypting file: %v", err)
 	}
 
-	// Se hacen 3 intentos, ya que el borrado puede fallar al
+	// Se hacen 6 intentos, ya que el borrado puede fallar al
 	// realizarse simultáneamente con el restore del backup
-	for i := 0; i < 3; i++ {
-		err := os.Remove(encryptedFilePath)
-		if err == nil {
-			logging.Log(fmt.Sprintf("Error deleting encrypted file: %v", err))
+	for i := 0; i < 6; i++ {
+		if err := os.Remove(encryptedFilePath); err == nil {
+			logging.Log("Encrypted backup file deleted")
 			break
+		} else if i == 5 {
+			logging.Log(fmt.Sprintf("Error deleting encrypted backup file after retries: %v", err))
 		}
 		time.Sleep(500 * time.Millisecond)
 	}

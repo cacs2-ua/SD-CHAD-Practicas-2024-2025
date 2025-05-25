@@ -18,11 +18,25 @@ import (
 )
 
 const (
-	logDir            = "logs"                              // Carpeta local para logs
-	credentialsPath   = "keys/credentials.json"             // Ruta al archivo JSON con las credenciales
-	driveFolderID     = "1ka0Ec2EnHcF2qrvk9nsaSpI124jkLMwj" // ID de la carpeta en Google Drive
-	encryptionKeyPath = "keys/logs_encryption.key"          // Ruta a la clave de cifrado
+	logDir            = "logs"
+	credentialsPath   = "keys/credentials.json"
+	driveFolderID     = "1ka0Ec2EnHcF2qrvk9nsaSpI124jkLMwj"
+	encryptionKeyPath = "keys/logs_encryption.key"
 )
+
+var encryptionKeyBytes []byte
+
+func init() {
+	keyHexRaw, err := os.ReadFile(encryptionKeyPath)
+	if err != nil {
+		panic(fmt.Sprintf("logging: %v", err))
+	}
+	keyHex := strings.TrimSpace(string(keyHexRaw))
+	encryptionKeyBytes, err = hex.DecodeString(keyHex)
+	if err != nil {
+		panic(fmt.Sprintf("logging: %v", err))
+	}
+}
 
 func Log(message string) {
 	defer func() {
@@ -55,7 +69,7 @@ func Log(message string) {
 	}
 
 	encryptedFilePath := logFilePath + ".enc"
-	if err := encryptFile(logFilePath, encryptedFilePath, encryptionKeyPath); err != nil {
+	if err := encryptFile(logFilePath, encryptedFilePath); err != nil {
 		fmt.Printf("Error encrypting log file: %v\n", err)
 		return
 	}
@@ -65,40 +79,46 @@ func Log(message string) {
 		return
 	}
 
-	if err := uploadToGoogleDrive(logFilePath, driveFolderID); err != nil {
-		fmt.Printf("Error uploading plain text log file to Google Drive: %v\n", err)
-		return
+	// Intentar borrar el .enc hasta 6 veces si está bloqueado
+	for i := 0; i < 6; i++ {
+		if err := os.Remove(encryptedFilePath); err != nil {
+			if i == 5 {
+				fmt.Printf("Error deleting encrypted log file after retries: %v\n", err)
+			}
+			time.Sleep(100 * time.Millisecond)
+		} else {
+			break
+		}
 	}
 
-	if err := os.Remove(encryptedFilePath); err != nil {
-		fmt.Printf("Error deleting encrypted log file: %v\n", err)
+	// Intentar borrar el .txt hasta 6 veces si está bloqueado
+	for i := 0; i < 6; i++ {
+		if err := os.Remove(logFilePath); err != nil {
+			if i == 5 {
+				fmt.Printf("Error deleting plain log file after retries: %v\n", err)
+			}
+			time.Sleep(100 * time.Millisecond)
+		} else {
+			break
+		}
 	}
+
 }
 
-func encryptFile(inputPath, outputPath, keyPath string) error {
-	key, err := os.ReadFile(keyPath)
-	if err != nil {
-		return fmt.Errorf("error reading encryption key: %v", err)
-	}
+func encryptFile(inputPath, outputPath string) error {
+	keyBytes := encryptionKeyBytes
 
-	keyStr := strings.TrimSpace(string(key))
-
-	keyBytes, err := hex.DecodeString(keyStr)
-	if err != nil {
-		return fmt.Errorf("error decoding encryption key: %v", err)
-	}
-
-	inputFile, err := os.Open(inputPath)
+	in, err := os.Open(inputPath)
 	if err != nil {
 		return fmt.Errorf("error opening input file: %v", err)
 	}
-	defer inputFile.Close()
+	defer in.Close()
 
-	outputFile, err := os.Create(outputPath)
+	out, err := os.Create(outputPath)
 	if err != nil {
 		return fmt.Errorf("error creating output file: %v", err)
 	}
-	defer outputFile.Close()
+	defer out.Close()
 
 	block, err := aes.NewCipher(keyBytes)
 	if err != nil {
@@ -110,15 +130,15 @@ func encryptFile(inputPath, outputPath, keyPath string) error {
 		return fmt.Errorf("error generating IV: %v", err)
 	}
 
-	if _, err := outputFile.Write(iv); err != nil {
-		return fmt.Errorf("error writing IV to output file: %v", err)
+	if _, err := out.Write(iv); err != nil {
+		return fmt.Errorf("error writing IV: %v", err)
 	}
 
 	stream := cipher.NewCFBEncrypter(block, iv)
+	writer := &cipher.StreamWriter{S: stream, W: out}
 
-	writer := &cipher.StreamWriter{S: stream, W: outputFile}
-	if _, err := io.Copy(writer, inputFile); err != nil {
-		return fmt.Errorf("error encrypting file: %v", err)
+	if _, err := io.Copy(writer, in); err != nil {
+		return fmt.Errorf("error encrypting data: %v", err)
 	}
 
 	return nil
