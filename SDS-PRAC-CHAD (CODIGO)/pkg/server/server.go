@@ -2,14 +2,12 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -32,8 +30,6 @@ import (
 	"github.com/google/uuid"
 	"go.etcd.io/bbolt"
 	"golang.org/x/crypto/sha3"
-	"google.golang.org/api/drive/v2"
-	"google.golang.org/api/option"
 )
 
 type ChatMessage struct {
@@ -294,11 +290,16 @@ func (s *serverImpl) apiHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *serverImpl) registerUser(req api.Request) api.Response {
 	req.Username = strings.TrimSpace(req.Username)
+	req.Email = strings.TrimSpace(req.Email)
 	req.Password = strings.TrimSpace(req.Password)
 	req.UserGroup = strings.TrimSpace(req.UserGroup)
 
 	if req.Username == "" || req.Password == "" || req.Email == "" {
 		return api.Response{Success: false, Message: "Missing credentials"}
+	}
+
+	if req.UserGroup == "admin" || req.UserGroup == "moderator" {
+		return api.Response{Success: false, Message: "User group cannot be 'admin' nor 'moderator'"}
 	}
 
 	if req.UserGroup == "" {
@@ -422,10 +423,8 @@ func createDefaultUsers(db store.Store) error {
 	}
 
 	for _, user := range defaultUsers {
-		// Check if user already exists by email (using hashed email as key)
 		keyEmail := store.HashBytes([]byte(user.email))
 		if _, err := db.Get("cheese_auth_uuid", keyEmail); err == nil {
-			// User exists, continue to next user
 			continue
 		}
 
@@ -705,28 +704,6 @@ func (s *serverImpl) backupDatabase() api.Response {
 	return api.Response{Success: true, Message: "Backup created successfully"}
 }
 
-func DownloadBackupFromGoogleDrive(fileID string, destinationPath string, credentialsPath string) error {
-	ctx := context.Background()
-	srv, err := drive.NewService(ctx, option.WithCredentialsFile(credentialsPath))
-	if err != nil {
-		return fmt.Errorf("error creating Google Drive service: %v", err)
-	}
-	resp, err := srv.Files.Get(fileID).Download()
-	if err != nil {
-		return fmt.Errorf("error downloading file from Google Drive: %v", err)
-	}
-	defer resp.Body.Close()
-	destFile, err := os.Create(destinationPath)
-	if err != nil {
-		return fmt.Errorf("error creating destination file: %v", err)
-	}
-	defer destFile.Close()
-	if _, err := io.Copy(destFile, resp.Body); err != nil {
-		return fmt.Errorf("error saving file to destination: %v", err)
-	}
-	return nil
-}
-
 func (s *serverImpl) restoreDatabase(req api.Request) api.Response {
 	if req.Data == "" {
 		return api.Response{Success: false, Message: "Missing backup file ID"}
@@ -752,7 +729,8 @@ func (s *serverImpl) restoreDatabase(req api.Request) api.Response {
 		return api.Response{Success: false, Message: "Error counting database entries: " + err.Error()}
 	}
 
-	logging.Log(fmt.Sprintf("Backup restored for the user %s: %s", req.Username))
+	logging.Log(fmt.Sprintf("Backup restored for the user %s", req.Username))
+
 	return api.Response{
 		Success: true,
 		Message: fmt.Sprintf("Backup restored successfully. Total entries restored: %d", lineCount),
