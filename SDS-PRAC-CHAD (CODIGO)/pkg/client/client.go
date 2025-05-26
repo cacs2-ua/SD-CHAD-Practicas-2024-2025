@@ -6,7 +6,6 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -20,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/sha3"
 
 	"prac/pkg/api"
 	pcrypto "prac/pkg/crypto"
@@ -499,8 +500,8 @@ func (c *client) loginWithPublicKey() {
 		return
 	}
 
-	hash := sha256.Sum256([]byte(challenge))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, authPrivKey, crypto.SHA256, hash[:])
+	hash := sha3.Sum256([]byte(challenge))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, authPrivKey, crypto.SHA3_256, hash[:])
 	if err != nil {
 		fmt.Println("Error signing challenge:", err)
 		return

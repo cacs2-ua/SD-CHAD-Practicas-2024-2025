@@ -4,7 +4,9 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
+
+	"golang.org/x/crypto/sha3"
+
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -196,8 +198,8 @@ func VerifyPublicKeyLogin(db store.Store, email string, signatureB64 string) (st
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("error decoding signature: %v", err)
 	}
-	hash := sha256.Sum256([]byte(nInfo.Nonce))
-	if err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hash[:], sig); err != nil {
+	hash := sha3.Sum256([]byte(nInfo.Nonce))
+	if err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA3_256, hash[:], sig); err != nil {
 		return "", "", "", "", errors.New("signature verification failed")
 	}
 
