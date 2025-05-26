@@ -4,7 +4,9 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
+
+	"golang.org/x/crypto/sha3"
+
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
@@ -110,8 +112,9 @@ func LoadPublicKey(username string) (*rsa.PublicKey, error) {
 }
 
 func SignMessage(message []byte, privateKey *rsa.PrivateKey) ([]byte, error) {
-	hashed := sha256.Sum256(message)
-	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, hashed[:])
+	hashed := sha3.Sum256(message)
+	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA3_256, hashed[:])
+
 	if err != nil {
 		return nil, fmt.Errorf("error signing message: %v", err)
 	}
@@ -119,8 +122,9 @@ func SignMessage(message []byte, privateKey *rsa.PrivateKey) ([]byte, error) {
 }
 
 func VerifySignature(message, signature []byte, publicKey *rsa.PublicKey) error {
-	hashed := sha256.Sum256(message)
-	err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hashed[:], signature)
+	hashed := sha3.Sum256(message)
+	err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA3_256, hashed[:], signature)
+
 	if err != nil {
 		return fmt.Errorf("signature verification failed: %v", err)
 	}
@@ -129,7 +133,7 @@ func VerifySignature(message, signature []byte, publicKey *rsa.PublicKey) error 
 
 func EncryptWithPublicKey(data []byte, publicKey *rsa.PublicKey) ([]byte, error) {
 	label := []byte("") // empty label
-	encryptedData, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, publicKey, data, label)
+	encryptedData, err := rsa.EncryptOAEP(sha3.New256(), rand.Reader, publicKey, data, label)
 	if err != nil {
 		return nil, fmt.Errorf("error encrypting with public key: %v", err)
 	}
@@ -138,7 +142,7 @@ func EncryptWithPublicKey(data []byte, publicKey *rsa.PublicKey) ([]byte, error)
 
 func DecryptWithPrivateKey(data []byte, privateKey *rsa.PrivateKey) ([]byte, error) {
 	label := []byte("")
-	decryptedData, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, privateKey, data, label)
+	decryptedData, err := rsa.DecryptOAEP(sha3.New256(), rand.Reader, privateKey, data, label)
 	if err != nil {
 		return nil, fmt.Errorf("error decrypting with private key: %v", err)
 	}
